@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>%WEB_TITLE%</title>
+    <!-- Web-App auf dem iPhone: „Teilen → Zum Home-Bildschirm" startet ohne Safari-Leisten, immer dunkel -->
+    <meta name="theme-color" content="#111513" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Wochenplan" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+    <link rel="manifest" href="manifest.json" />
+    <style id="expo-reset">
+      html,
+      body {
+        height: 100%;
+        background: #111513;
+        color-scheme: dark;
+      }
+      body {
+        overflow: hidden;
+      }
+      #root {
+        display: flex;
+        height: 100%;
+        flex: 1;
+        box-sizing: border-box;
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+      }
+      input, textarea { font-size: 16px; } /* verhindert das Hineinzoomen auf dem iPhone */
+    </style>
+  </head>
+
+  <body>
+    <noscript>Bitte JavaScript einschalten.</noscript>
+    <div id="root"></div>
+  </body>
+</html>
