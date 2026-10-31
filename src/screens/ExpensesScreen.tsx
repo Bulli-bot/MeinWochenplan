@@ -151,7 +151,7 @@ export function ExpensesScreen({ purchases, budget, plannedCost, planIngredients
   );
 }
 
-function CategoryBar({ purchases }: { purchases: Purchase[] }) {
+export function CategoryBar({ purchases }: { purchases: Purchase[] }) {
   const sums = sumBy(purchases);
   const total = CATEGORY_ORDER.reduce((s, c) => s + Math.max(0, sums[c]), 0);
   if (!total) return null;

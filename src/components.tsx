@@ -1,13 +1,24 @@
 import { Image, Pressable, StyleSheet, Text, TextInput, View, type TextInputProps } from 'react-native';
 import { usePhoto } from './photos';
-import { colors, styles } from './ui';
+import { Icon, colors, styles } from './ui';
 
 /** Foto aus dem Fotospeicher (lädt bei Bedarf aus der Cloud nach). */
 export function Thumb({ id, size = 64, onPress }: { id: string | undefined; size?: number; onPress?: () => void }) {
   const data = usePhoto(id);
   const box = { width: size, height: size, borderRadius: 10 };
-  const body = data ? <Image source={{ uri: data }} style={box} /> : <View style={[box, local.empty]}><Text style={local.emptyText}>🍽</Text></View>;
+  const body = data ? <Image source={{ uri: data }} style={box} /> : <View style={[box, local.empty]}><Icon name="image" size={Math.round(size / 3)} color={colors.faint} /></View>;
   return onPress ? <Pressable onPress={onPress}>{body}</Pressable> : body;
+}
+
+/** Breite Fotokachel für Tageskarten; ohne Foto ein ruhiger Platzhalter mit Icon. */
+export function Cover({ id, height = 120 }: { id: string | undefined; height?: number }) {
+  const data = usePhoto(id);
+  if (data) return <Image source={{ uri: data }} style={{ width: '100%', height, borderRadius: 12 }} resizeMode="cover" />;
+  return (
+    <View style={[local.empty, { width: '100%', height, borderRadius: 12 }]}>
+      <Icon name="camera" size={22} color={colors.faint} />
+    </View>
+  );
 }
 
 export function BigPhoto({ id, onDelete }: { id: string; onDelete?: () => void }) {

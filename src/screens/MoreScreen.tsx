@@ -4,7 +4,7 @@ import type { SyncStatus } from '../cloud';
 import { helperStatus } from '../pchelper';
 import { EMPTY_STATE } from '../storage';
 import type { AppState } from '../types';
-import { Button, colors, styles } from '../ui';
+import { Button, Card, Icon, colors, hov, styles, type IconName } from '../ui';
 
 /** Sicherung als JSON-Datei herunterladen (ohne Fotos – die liegen in der Cloud). */
 function downloadBackup(state: AppState) {
@@ -40,8 +40,10 @@ function pickBackup(): Promise<AppState | null> {
 
 export type MoreView = 'einstellungen' | 'vorrat' | 'preise' | 'cloud';
 
-export function MoreScreen({ state, syncStatus, onOpen, onRestore }: {
+export function MoreScreen({ state, syncStatus, onOpen, onRestore, onExpenses }: {
   state: AppState;
+  /** Nur auf dem Handy: Ausgaben haben dort keinen eigenen Tab */
+  onExpenses?: () => void;
   syncStatus: SyncStatus;
   onOpen: (v: MoreView) => void;
   onRestore: (s: AppState) => void;
@@ -57,25 +59,30 @@ export function MoreScreen({ state, syncStatus, onOpen, onRestore }: {
       .catch(() => setHelper('aus – nur am PC nötig (Bons auslesen, Rezept-Links)'));
   }, []);
 
-  const entries: [MoreView, string, string][] = [
-    ['vorrat', 'Vorrat', pantryCount ? `${pantryCount} Sachen zu Hause` : 'Was du schon hast, nicht mehr kaufen'],
-    ['preise', 'Preise', ownPrices ? `${ownPrices} eigene Preise` : 'Zutatenpreise ansehen und anpassen'],
-    ['cloud', 'Cloud-Sync (PC ↔ iPhone)', syncStatus.text],
-    ['einstellungen', 'Einstellungen', 'Haushalt, Budget, Kinder, Kochtage …'],
+  const entries: [MoreView | 'ausgaben', string, string, IconName][] = [
+    ...(onExpenses ? [['ausgaben', 'Ausgaben', 'Bons, Wochenverlauf, Budget', 'credit-card'] as [MoreView | 'ausgaben', string, string, IconName]] : []),
+    ['vorrat', 'Vorrat', pantryCount ? `${pantryCount} Sachen zu Hause` : 'Was du schon hast, nicht mehr kaufen', 'archive'],
+    ['preise', 'Preise', ownPrices ? `${ownPrices} eigene Preise` : 'Zutatenpreise ansehen und anpassen', 'tag'],
+    ['cloud', 'Cloud-Sync', syncStatus.text, 'cloud'],
+    ['einstellungen', 'Einstellungen', 'Haushalt, Budget, Kinder, Kochtage …', 'sliders'],
   ];
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Text style={styles.h1}>Mehr</Text>
-      {entries.map(([id, title, sub]) => (
-        <Pressable key={id} onPress={() => onOpen(id)} style={[styles.card, local.entry]} accessibilityRole="button">
-          <View style={{ flex: 1 }}>
-            <Text style={styles.sectionTitle}>{title}</Text>
-            <Text style={[styles.hint, id === 'cloud' && syncStatus.kind === 'fehler' && { color: colors.danger }]}>{sub}</Text>
-          </View>
-          <Text style={local.chev}>›</Text>
-        </Pressable>
-      ))}
+      <Card style={{ padding: 0, gap: 0 }}>
+        {entries.map(([id, title, sub, icon], i) => (
+          <Pressable key={id} onPress={() => (id === 'ausgaben' ? onExpenses?.() : onOpen(id))} accessibilityRole="button"
+            style={(st) => [local.entry, i > 0 && local.divider, hov(st) && { backgroundColor: colors.cardHover }]}>
+            <View style={local.iconBox}><Icon name={icon} size={18} color={colors.accent} /></View>
+            <View style={{ flex: 1 }}>
+              <Text style={local.title}>{title}</Text>
+              <Text style={[styles.hint, id === 'cloud' && syncStatus.kind === 'fehler' && { color: colors.danger }]} numberOfLines={1}>{sub}</Text>
+            </View>
+            <Icon name="chevron-right" />
+          </Pressable>
+        ))}
+      </Card>
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>PC-Helfer</Text>
         <Text style={styles.hint}>{helper}</Text>
@@ -101,6 +108,8 @@ export function MoreScreen({ state, syncStatus, onOpen, onRestore }: {
 }
 
 const local = StyleSheet.create({
-  entry: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  chev: { fontSize: 26, color: colors.muted },
+  entry: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, minHeight: 68, borderRadius: 16 },
+  divider: { borderTopWidth: 1, borderTopColor: colors.border, borderRadius: 0 },
+  iconBox: { width: 38, height: 38, borderRadius: 11, backgroundColor: colors.accentSoft, alignItems: 'center', justifyContent: 'center' },
+  title: { fontSize: 16, fontWeight: '700', color: colors.text },
 });

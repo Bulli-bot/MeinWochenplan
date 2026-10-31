@@ -1,13 +1,13 @@
 import type { ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Badge, BigPhoto, Thumb } from '../components';
+import { Cover } from '../components';
 import { RECIPE_BY_ID } from '../data/recipes';
+import { shortDate, slotDate, todayIndex } from '../logic/dates';
 import { planCost, portionCost } from '../logic/generator';
 import type { MealPlan, PhotoRef } from '../types';
-import { Button, WEEKDAYS_LONG, colors, euro, styles } from '../ui';
+import { Button, Card, Eyebrow, Grid, Icon, Tag, WEEKDAYS_LONG, colors, euro, hov, space, styles, useLayout } from '../ui';
 
-/** 0 = Montag … 6 = Sonntag */
-export const todayIndex = () => (new Date().getDay() + 6) % 7;
+export { todayIndex };
 
 export function PlanScreen({ plan, householdSize, budget, favourites, cooked, photos, kidInfo, error, onOpen, onSwap, onChoose, onRegenerate, footer }: {
   plan: MealPlan;
@@ -24,77 +24,84 @@ export function PlanScreen({ plan, householdSize, budget, favourites, cooked, ph
   onRegenerate: () => void;
   footer?: ReactNode;
 }) {
+  const { columns } = useLayout();
   const total = planCost(plan, householdSize, RECIPE_BY_ID);
   const today = todayIndex();
-  // „Als Nächstes": heute, sonst der nächste Kochtag, der noch nicht gekocht ist
-  const upcoming = [...plan.slots]
-    .sort((a, b) => ((a.day - today + 7) % 7) - ((b.day - today + 7) % 7))
-    .find((s) => !cooked.includes(s.recipeId));
-  const next = upcoming ? RECIPE_BY_ID[upcoming.recipeId] : undefined;
-  const nextPhoto = next ? photos[next.id]?.[0]?.id : undefined;
+  const ratio = budget ? total / budget : 0;
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <Text style={styles.h1}>Dein Wochenplan</Text>
-      <Text style={styles.sub}>
-        {plan.slots.length} Gerichte · ca. {euro(total)} von {euro(budget)} · {householdSize} {householdSize === 1 ? 'Person' : 'Personen'}
-      </Text>
+      <View style={local.head}>
+        <View style={{ flex: 1, minWidth: 220, gap: 4 }}>
+          <Text style={styles.h1}>Deine Woche</Text>
+          <Text style={styles.sub}>
+            {shortDate(slotDate(plan, 0))} – {shortDate(slotDate(plan, 6))} · {plan.slots.length} Gerichte · {householdSize} {householdSize === 1 ? 'Person' : 'Personen'}
+          </Text>
+        </View>
+        <Button label="Neu erstellen" variant="ghost" icon="refresh-cw" onPress={onRegenerate} />
+      </View>
 
-      {next && upcoming ? (
-        <Pressable onPress={() => onOpen(next.id)} style={[styles.card, local.next]} accessibilityRole="button">
-          <Text style={local.day}>{upcoming.day === today ? 'Heute' : `Als Nächstes · ${WEEKDAYS_LONG[upcoming.day]}`}</Text>
-          <Text style={local.nextName}>{next.name}</Text>
-          <Text style={styles.hint}>{next.minutes} Min. · {euro(portionCost(next, householdSize))}</Text>
-          {nextPhoto ? <BigPhoto id={nextPhoto} /> : <Text style={styles.hint}>Noch kein Foto – nach dem Kochen im Rezept „Foto vom Essen" tippen.</Text>}
-        </Pressable>
-      ) : null}
+      <Card>
+        <View style={local.budgetRow}>
+          <Text style={styles.sectionTitle}>Budget</Text>
+          <Text style={[styles.sectionTitle, { color: ratio > 1 ? colors.danger : colors.text }]}>{euro(total)} <Text style={styles.hint}>von {euro(budget)}</Text></Text>
+        </View>
+        <View style={local.track}>
+          <View style={[local.fill, { width: `${Math.min(100, ratio * 100)}%`, backgroundColor: ratio > 1 ? colors.danger : ratio > 0.85 ? colors.warn : colors.accent }]} />
+        </View>
+      </Card>
 
-      {plan.slots.map((slot) => {
-        const r = RECIPE_BY_ID[slot.recipeId];
-        if (!r) return null;
-        const kids = kidInfo(r.id);
-        const isCooked = cooked.includes(r.id);
-        return (
-          <Pressable key={slot.day} onPress={() => onOpen(r.id)} style={[styles.card, isCooked && local.done]} accessibilityRole="button">
-            <View style={local.top}>
-              <Thumb id={photos[r.id]?.[0]?.id} />
-              <View style={{ flex: 1 }}>
-                <Text style={local.day}>{WEEKDAYS_LONG[slot.day]}{slot.day === today ? ' · heute' : ''}</Text>
-                <Text style={local.name}>{r.name}{favourites.includes(r.id) ? ' ♥' : ''}</Text>
-                <View style={local.badges}>
-                  <Text style={styles.hint}>{r.minutes} Min. · {euro(portionCost(r, householdSize))}</Text>
-                  {isCooked ? <Badge label="gekocht ✓" tone="accent" /> : null}
-                  {kids.up ? <Badge label={`👍 ${kids.up}`} tone="accent" /> : null}
-                  {kids.down ? <Badge label={`👎 ${kids.down}`} tone="danger" /> : null}
-                </View>
+      <Grid columns={columns}>
+        {plan.slots.map((slot) => {
+          const r = RECIPE_BY_ID[slot.recipeId];
+          if (!r) return null;
+          const kids = kidInfo(r.id);
+          const isCooked = cooked.includes(r.id);
+          const isToday = slot.day === today;
+          return (
+            <Card key={slot.day} accent={isToday} onPress={() => onOpen(r.id)} style={local.day}>
+              <View style={local.dayHead}>
+                <Eyebrow color={isToday ? colors.accent : colors.muted}>{WEEKDAYS_LONG[slot.day]}</Eyebrow>
+                <Text style={[styles.hint, isToday && { color: colors.accent }]}>{isToday ? 'heute' : shortDate(slotDate(plan, slot.day))}</Text>
               </View>
-            </View>
-            <View style={local.row}>
-              <Pressable onPress={() => onChoose(slot.day)} style={styles.small} accessibilityRole="button">
-                <Text style={styles.smallText}>Selbst aussuchen</Text>
-              </Pressable>
-              <Pressable onPress={() => onSwap(slot.day)} style={styles.small} accessibilityRole="button">
-                <Text style={styles.smallText}>Zufällig tauschen</Text>
-              </Pressable>
-            </View>
-          </Pressable>
-        );
-      })}
+              {columns > 1 || photos[r.id]?.[0] ? <Cover id={photos[r.id]?.[0]?.id} height={columns > 1 ? 120 : 170} /> : null}
+              <Text style={local.name} numberOfLines={2}>{r.name}{favourites.includes(r.id) ? '  ♥' : ''}</Text>
+              <View style={styles.row}>
+                {isCooked ? <Tag label="Gekocht" tone="accent" icon="check" /> : <Tag label={`${r.minutes} Min.`} tone="info" icon="clock" />}
+                <Tag label={euro(portionCost(r, householdSize))} icon="tag" />
+                {kids.up ? <Tag label={`${kids.up}`} tone="accent" icon="thumbs-up" /> : null}
+                {kids.down ? <Tag label={`${kids.down}`} tone="danger" icon="thumbs-down" /> : null}
+              </View>
+              <View style={local.actions}>
+                <Pressable onPress={() => onChoose(slot.day)} accessibilityRole="button" style={(st) => [local.action, hov(st) && local.actionHover]}>
+                  <Icon name="list" size={15} color={colors.accent} />
+                  <Text style={styles.smallText}>Aussuchen</Text>
+                </Pressable>
+                <Pressable onPress={() => onSwap(slot.day)} accessibilityRole="button" style={(st) => [local.action, hov(st) && local.actionHover]}>
+                  <Icon name="shuffle" size={15} color={colors.accent} />
+                  <Text style={styles.smallText}>Tauschen</Text>
+                </Pressable>
+              </View>
+            </Card>
+          );
+        })}
+      </Grid>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      <Button label="Ganzen Plan neu erstellen" variant="secondary" onPress={onRegenerate} />
       {footer}
     </ScrollView>
   );
 }
 
 const local = StyleSheet.create({
-  next: { borderColor: colors.accent, gap: 6 },
-  nextName: { fontSize: 22, fontWeight: '700', color: colors.text },
-  day: { fontSize: 13, fontWeight: '600', color: colors.accent, textTransform: 'uppercase' },
-  name: { fontSize: 18, fontWeight: '600', color: colors.text, marginVertical: 2 },
-  top: { flexDirection: 'row', gap: 12, alignItems: 'center' },
-  badges: { flexDirection: 'row', gap: 6, alignItems: 'center', flexWrap: 'wrap' },
-  row: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 8 },
-  done: { opacity: 0.75 },
+  head: { flexDirection: 'row', alignItems: 'center', gap: space.md, flexWrap: 'wrap' },
+  budgetRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
+  track: { height: 8, borderRadius: 4, backgroundColor: colors.input, overflow: 'hidden' },
+  fill: { height: 8, borderRadius: 4 },
+  day: { gap: space.sm },
+  dayHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  name: { fontSize: 17, fontWeight: '700', color: colors.text, minHeight: 22 },
+  actions: { flexDirection: 'row', gap: space.sm, marginTop: 4 },
+  action: { flex: 1, flexDirection: 'row', gap: 6, minHeight: 36, borderRadius: 10, backgroundColor: colors.accentSoft, alignItems: 'center', justifyContent: 'center' },
+  actionHover: { backgroundColor: '#25402F' },
 });

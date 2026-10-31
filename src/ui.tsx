@@ -1,29 +1,106 @@
-import type { ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import Feather from '@expo/vector-icons/Feather';
+import { Children, type ComponentProps, type ReactNode } from 'react';
+import { Pressable, StyleSheet, Text, View, useWindowDimensions, type PressableStateCallbackType, type StyleProp, type ViewStyle } from 'react-native';
+
+/** RN-Web kennt zusätzlich „hovered“ (Maus über dem Element). */
+export type HoverState = PressableStateCallbackType & { hovered?: boolean };
+export const hov = (s: PressableStateCallbackType) => (s as HoverState).hovered === true;
 
 /** Immer dunkel – einen hellen Modus gibt es bewusst nicht. */
 export const colors = {
-  bg: '#111513',
-  card: '#1B201D',
-  input: '#141916',
-  text: '#E7ECE8',
-  muted: '#98A29B',
-  accent: '#62B87D',
-  onAccent: '#0D1710',
-  accentSoft: '#22362A',
-  border: '#2B332E',
-  danger: '#EE7A64',
-  warn: '#E6B450',
+  bg: '#0D1110',
+  surface: '#121715',
+  card: '#171D1A',
+  cardHover: '#1C2420',
+  input: '#111614',
+  text: '#ECF1EE',
+  muted: '#93A099',
+  faint: '#66726B',
+  accent: '#5FBF85',
+  onAccent: '#08130C',
+  accentSoft: '#1D3326',
+  border: '#242C28',
+  borderStrong: '#34403A',
+  info: '#6EA8F2',
+  infoSoft: '#1A2A3D',
+  warn: '#E9B949',
+  warnSoft: '#3A3018',
+  danger: '#F07A6A',
+  dangerSoft: '#3D2220',
 };
+
+export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 };
+export const radius = { sm: 10, md: 12, lg: 16, xl: 20 };
+/** Weicher Schatten für Karten (RN-Web macht daraus box-shadow) */
+export const shadow = { shadowColor: '#000', shadowOpacity: 0.28, shadowRadius: 18, shadowOffset: { width: 0, height: 6 } };
 
 export const WEEKDAYS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
 export const WEEKDAYS_LONG = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
 
 export const euro = (value: number) => value.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' });
 
+export type IconName = ComponentProps<typeof Feather>['name'];
+export function Icon({ name, size = 18, color = colors.muted }: { name: IconName; size?: number; color?: string }) {
+  return <Feather name={name} size={size} color={color} />;
+}
+
+/** Bildschirmgröße: Handy < 700 px, Tablet bis 1023 px, ab 1024 px Desktop mit Seitenleiste. */
+export function useLayout() {
+  const { width } = useWindowDimensions();
+  const isDesktop = width >= 1024;
+  const isTablet = width >= 700 && !isDesktop;
+  return { width, isDesktop, isTablet, isPhone: width < 700, columns: isDesktop ? 4 : isTablet ? 2 : 1 };
+}
+
+/** Raster mit gleich breiten Spalten; bricht automatisch um. */
+export function Grid({ columns, gap = space.md, children }: { columns: number; gap?: number; children: ReactNode }) {
+  const items = Children.toArray(children).filter(Boolean);
+  if (columns <= 1) return <View style={{ gap }}>{items}</View>;
+  return (
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap }}>
+      {items.map((child, i) => (
+        <View key={i} style={{ flexBasis: `${100 / columns - 3}%`, flexGrow: 1, maxWidth: `${100 / columns}%`, minWidth: 0 }}>{child}</View>
+      ))}
+    </View>
+  );
+}
+
+export function Card({ children, style, onPress, accent }: { children: ReactNode; style?: StyleProp<ViewStyle>; onPress?: () => void; accent?: boolean }) {
+  const base = [styles.card, accent && { borderColor: colors.accent }, style];
+  if (!onPress) return <View style={base}>{children}</View>;
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button" style={(s) => [base, hov(s) && styles.cardHover]}>
+      {children}
+    </Pressable>
+  );
+}
+
+type Tone = 'accent' | 'info' | 'warn' | 'danger' | 'muted';
+const TONES: Record<Tone, [string, string]> = {
+  accent: [colors.accentSoft, colors.accent],
+  info: [colors.infoSoft, colors.info],
+  warn: [colors.warnSoft, colors.warn],
+  danger: [colors.dangerSoft, colors.danger],
+  muted: [colors.surface, colors.muted],
+};
+export function Tag({ label, tone = 'muted', icon }: { label: string; tone?: Tone; icon?: IconName }) {
+  const [bg, fg] = TONES[tone];
+  return (
+    <View style={[styles.tag, { backgroundColor: bg }]}>
+      {icon ? <Icon name={icon} size={12} color={fg} /> : null}
+      <Text style={[styles.tagText, { color: fg }]}>{label}</Text>
+    </View>
+  );
+}
+
+export function Eyebrow({ children, color = colors.muted }: { children: ReactNode; color?: string }) {
+  return <Text style={[styles.eyebrow, { color }]}>{children}</Text>;
+}
+
 export function Chip({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} style={[styles.chip, selected && styles.chipSelected]} accessibilityRole="button" accessibilityState={{ selected }}>
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityState={{ selected }}
+      style={(s) => [styles.chip, hov(s) && !selected && styles.chipHover, selected && styles.chipSelected]}>
       <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{label}</Text>
     </Pressable>
   );
@@ -39,10 +116,21 @@ export function Section({ title, hint, children }: { title: string; hint?: strin
   );
 }
 
-export function Button({ label, onPress, variant = 'primary' }: { label: string; onPress: () => void; variant?: 'primary' | 'secondary' }) {
+export function Button({ label, onPress, variant = 'primary', icon }: {
+  label: string; onPress: () => void; variant?: 'primary' | 'secondary' | 'ghost'; icon?: IconName;
+}) {
+  const fg = variant === 'primary' ? colors.onAccent : variant === 'secondary' ? colors.accent : colors.text;
   return (
-    <Pressable onPress={onPress} style={[styles.button, variant === 'secondary' && styles.buttonSecondary]} accessibilityRole="button">
-      <Text style={[styles.buttonText, variant === 'secondary' && styles.buttonTextSecondary]}>{label}</Text>
+    <Pressable onPress={onPress} accessibilityRole="button"
+      style={(s) => [
+        styles.button,
+        variant === 'secondary' && styles.buttonSecondary,
+        variant === 'ghost' && styles.buttonGhost,
+        hov(s) && (variant === 'primary' ? styles.buttonHover : styles.buttonSecondaryHover),
+        s.pressed && { transform: [{ scale: 0.98 }] },
+      ]}>
+      {icon ? <Icon name={icon} size={18} color={fg} /> : null}
+      <Text style={[styles.buttonText, { color: fg }]}>{label}</Text>
     </Pressable>
   );
 }
@@ -52,12 +140,12 @@ export function Stepper({ value, label, onChange, step = 1, min, max }: {
 }) {
   return (
     <View style={styles.stepper}>
-      <Pressable onPress={() => onChange(Math.max(min, value - step))} style={styles.stepBtn} accessibilityLabel="weniger">
-        <Text style={styles.stepBtnText}>−</Text>
+      <Pressable onPress={() => onChange(Math.max(min, value - step))} style={styles.stepBtn} accessibilityLabel="weniger" accessibilityRole="button">
+        <Icon name="minus" color={colors.accent} />
       </Pressable>
       <Text style={styles.stepValue}>{label}</Text>
-      <Pressable onPress={() => onChange(Math.min(max, value + step))} style={styles.stepBtn} accessibilityLabel="mehr">
-        <Text style={styles.stepBtnText}>+</Text>
+      <Pressable onPress={() => onChange(Math.min(max, value + step))} style={styles.stepBtn} accessibilityLabel="mehr" accessibilityRole="button">
+        <Icon name="plus" color={colors.accent} />
       </Pressable>
     </View>
   );
@@ -65,32 +153,41 @@ export function Stepper({ value, label, onChange, step = 1, min, max }: {
 
 export const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  content: { padding: 16, paddingBottom: 40, gap: 12 },
-  h1: { fontSize: 26, fontWeight: '700', color: colors.text },
-  sub: { fontSize: 15, color: colors.muted },
-  card: { backgroundColor: colors.card, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: colors.border },
-  section: { gap: 6, marginTop: 8 },
-  sectionTitle: { fontSize: 17, fontWeight: '600', color: colors.text },
-  hint: { fontSize: 13, color: colors.muted },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
+  content: { padding: space.xl, paddingBottom: 48, gap: space.lg },
+  h1: { fontSize: 28, fontWeight: '800', color: colors.text, letterSpacing: -0.4 },
+  h2: { fontSize: 20, fontWeight: '700', color: colors.text, letterSpacing: -0.2 },
+  sub: { fontSize: 15, color: colors.muted, lineHeight: 22 },
+  card: { backgroundColor: colors.card, borderRadius: radius.lg, padding: space.lg, borderWidth: 1, borderColor: colors.border, gap: space.sm, ...shadow },
+  cardHover: { backgroundColor: colors.cardHover, borderColor: colors.borderStrong },
+  section: { gap: space.sm, marginTop: space.sm },
+  sectionTitle: { fontSize: 17, fontWeight: '700', color: colors.text },
+  hint: { fontSize: 13, color: colors.muted, lineHeight: 19 },
+  eyebrow: { fontSize: 12, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase' },
+  tag: { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 3, alignSelf: 'flex-start' },
+  tagText: { fontSize: 12, fontWeight: '600' },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
+  chip: { minHeight: 36, justifyContent: 'center', paddingHorizontal: 14, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+  chipHover: { borderColor: colors.borderStrong, backgroundColor: colors.cardHover },
   chipSelected: { backgroundColor: colors.accent, borderColor: colors.accent },
   chipText: { fontSize: 14, color: colors.text },
   chipTextSelected: { color: colors.onAccent, fontWeight: '700' },
-  button: { backgroundColor: colors.accent, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  button: { minHeight: 44, flexDirection: 'row', gap: space.sm, backgroundColor: colors.accent, borderRadius: radius.md, paddingHorizontal: space.lg, alignItems: 'center', justifyContent: 'center' },
+  buttonHover: { backgroundColor: '#72CC96' },
   buttonSecondary: { backgroundColor: colors.accentSoft },
-  buttonText: { color: colors.onAccent, fontSize: 16, fontWeight: '700' },
+  buttonSecondaryHover: { backgroundColor: '#25402F' },
+  buttonGhost: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border },
+  buttonText: { color: colors.onAccent, fontSize: 15, fontWeight: '700' },
   buttonTextSecondary: { color: colors.accent },
-  stepper: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  stepBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.accentSoft, alignItems: 'center', justifyContent: 'center' },
+  stepper: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  stepBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.accentSoft, alignItems: 'center', justifyContent: 'center' },
   stepBtnText: { fontSize: 22, color: colors.accent, fontWeight: '700' },
-  stepValue: { fontSize: 16, minWidth: 110, textAlign: 'center', color: colors.text },
+  stepValue: { fontSize: 16, minWidth: 110, textAlign: 'center', color: colors.text, fontWeight: '600' },
   error: { color: colors.danger, fontSize: 14 },
   input: {
-    backgroundColor: colors.input, color: colors.text, borderWidth: 1, borderColor: colors.border, borderRadius: 10,
-    paddingHorizontal: 12, paddingVertical: 10, fontSize: 16,
+    minHeight: 44, backgroundColor: colors.input, color: colors.text, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md,
+    paddingHorizontal: 14, paddingVertical: 10, fontSize: 16,
   },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
-  small: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.accentSoft },
-  smallText: { color: colors.accent, fontWeight: '600' },
+  row: { flexDirection: 'row', alignItems: 'center', gap: space.sm, flexWrap: 'wrap' },
+  small: { minHeight: 36, justifyContent: 'center', paddingHorizontal: 14, borderRadius: radius.sm, backgroundColor: colors.accentSoft },
+  smallText: { color: colors.accent, fontWeight: '600', fontSize: 14 },
 });

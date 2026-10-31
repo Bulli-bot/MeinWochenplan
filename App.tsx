@@ -8,6 +8,7 @@ import { deletePhotoData, newPhotoId, pickPhoto, savePhotoData } from './src/pho
 import { CloudScreen, readConnectLink } from './src/screens/CloudScreen';
 import { ExpensesScreen } from './src/screens/ExpensesScreen';
 import { MoreScreen, type MoreView } from './src/screens/MoreScreen';
+import { OverviewScreen } from './src/screens/OverviewScreen';
 import { PantryScreen } from './src/screens/PantryScreen';
 import { PlanScreen } from './src/screens/PlanScreen';
 import { PricesScreen } from './src/screens/PricesScreen';
@@ -18,18 +19,22 @@ import { SettingsScreen } from './src/screens/SettingsScreen';
 import { ShoppingListScreen } from './src/screens/ShoppingListScreen';
 import { DEFAULT_SETTINGS, EMPTY_STATE, loadState, saveState } from './src/storage';
 import type { AppState, CustomRecipe, Settings } from './src/types';
-import { Button, colors, styles } from './src/ui';
+import { Button, Icon, colors, hov, space, styles, useLayout, type IconName } from './src/ui';
 
-type Tab = 'plan' | 'rezepte' | 'einkauf' | 'ausgaben' | 'mehr';
-const TABS: [Tab, string, string][] = [
-  ['plan', 'Plan', '🗓'], ['rezepte', 'Rezepte', '📖'], ['einkauf', 'Einkauf', '🛒'], ['ausgaben', 'Ausgaben', '€'], ['mehr', 'Mehr', '☰'],
+type Tab = 'start' | 'plan' | 'rezepte' | 'einkauf' | 'ausgaben' | 'mehr';
+const TABS: [Tab, string, IconName][] = [
+  ['start', 'Übersicht', 'grid'], ['plan', 'Woche', 'calendar'], ['rezepte', 'Rezepte', 'book-open'],
+  ['einkauf', 'Einkauf', 'shopping-cart'], ['ausgaben', 'Ausgaben', 'credit-card'], ['mehr', 'Mehr', 'menu'],
 ];
+/** Auf dem Handy ist unten nur Platz für fünf – Ausgaben gibt es dort über die Übersicht und „Mehr“. */
+const PHONE_TABS: Tab[] = ['start', 'plan', 'rezepte', 'einkauf', 'mehr'];
 const RECENT_LIMIT = 21;
 
 export default function App() {
   const [state, setState] = useState<AppState>(EMPTY_STATE);
   const [loaded, setLoaded] = useState(false);
-  const [tab, setTab] = useState<Tab>('plan');
+  const [tab, setTab] = useState<Tab>('start');
+  const layout = useLayout();
   const [openRecipe, setOpenRecipe] = useState<string | null>(null);
   const [editRecipe, setEditRecipe] = useState<CustomRecipe | 'neu' | null>(null);
   const [moreView, setMoreView] = useState<MoreView | null>(null);
@@ -246,6 +251,11 @@ export default function App() {
         }}
       />
     );
+  } else if (tab === 'start') {
+    body = (
+      <OverviewScreen state={state} settings={settings} plan={plan} syncStatus={syncStatus} onOpen={setOpenRecipe}
+        onGo={(t) => { setTab(t); setMoreView(null); }} />
+    );
   } else if (tab === 'plan') {
     body = (
       <PlanScreen
@@ -314,19 +324,50 @@ export default function App() {
   } else if (moreView === 'cloud') {
     body = cloudScreen(() => setMoreView(null));
   } else {
-    body = <MoreScreen state={state} syncStatus={syncStatus} onOpen={setMoreView} onRestore={(s) => { swapSeen.current = {}; setState(s); }} />;
+    body = <MoreScreen state={state} syncStatus={syncStatus} onOpen={setMoreView} onRestore={(s) => { swapSeen.current = {}; setState(s); }}
+      onExpenses={layout.isPhone ? () => setTab('ausgaben') : undefined} />;
   }
 
-  const showTabs = !isFirstRun && !openRecipe && !editRecipe && pickDay === null;
+  const showNav = !isFirstRun && !openRecipe && !editRecipe && pickDay === null;
+  const go = (id: Tab) => { setTab(id); setMoreView(null); setError(null); };
+  const tabs = layout.isPhone ? TABS.filter(([id]) => PHONE_TABS.includes(id)) : TABS;
+
   return (
     <View style={local.root}>
       <StatusBar style="light" />
-      <View style={local.body}>{body}</View>
-      {showTabs ? (
+      <View style={local.frame}>
+        {layout.isDesktop && !isFirstRun ? (
+          <View style={local.sidebar}>
+            <View style={local.brand}>
+              <View style={local.logo}><Icon name="coffee" size={18} color={colors.onAccent} /></View>
+              <Text style={local.brandText}>Wochenplan</Text>
+            </View>
+            {TABS.map(([id, label, icon]) => {
+              const active = tab === id && showNav;
+              return (
+                <Pressable key={id} onPress={() => { setOpenRecipe(null); setEditRecipe(null); setPickDay(null); go(id); }} accessibilityRole="tab" accessibilityState={{ selected: active }}
+                  style={(st) => [local.navItem, hov(st) && local.navHover, active && local.navActive]}>
+                  <Icon name={icon} size={18} color={active ? colors.accent : colors.muted} />
+                  <Text style={[local.navText, active && { color: colors.text, fontWeight: '700' }]}>{label}</Text>
+                </Pressable>
+              );
+            })}
+            <View style={{ flex: 1 }} />
+            <View style={local.syncBox}>
+              <Icon name="cloud" size={14} color={syncStatus.kind === 'fehler' ? colors.danger : syncStatus.kind === 'ok' ? colors.accent : colors.faint} />
+              <Text style={[styles.hint, { flex: 1 }]} numberOfLines={2}>{syncStatus.text}</Text>
+            </View>
+          </View>
+        ) : null}
+        <View style={local.main}><View style={[local.body, layout.isDesktop && { maxWidth: 1240 }]}>{body}</View></View>
+      </View>
+      {showNav && !layout.isDesktop ? (
         <View style={local.tabBar}>
-          {TABS.map(([id, label, icon]) => (
-            <Pressable key={id} onPress={() => { setTab(id); setMoreView(null); setError(null); }} style={local.tab} accessibilityRole="tab" accessibilityState={{ selected: tab === id }}>
-              <Text style={[local.tabIcon, tab === id && local.tabTextActive]}>{icon}</Text>
+          {tabs.map(([id, label, icon]) => (
+            <Pressable key={id} onPress={() => go(id)} style={local.tab} accessibilityRole="tab" accessibilityState={{ selected: tab === id }}>
+              <View style={[local.tabPill, tab === id && local.tabPillActive]}>
+                <Icon name={icon} size={20} color={tab === id ? colors.accent : colors.muted} />
+              </View>
               <Text style={[local.tabText, tab === id && local.tabTextActive]}>{label}</Text>
             </Pressable>
           ))}
@@ -339,11 +380,23 @@ export default function App() {
 const local = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg, paddingTop: Platform.OS === 'web' ? 0 : 44 },
   center: { alignItems: 'center', justifyContent: 'center' },
-  body: { flex: 1, width: '100%', maxWidth: 680, alignSelf: 'center' },
-  tabBar: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.card, paddingBottom: Platform.OS === 'web' ? 0 : 20 },
-  tab: { flex: 1, paddingVertical: 8, alignItems: 'center', gap: 2 },
-  tabIcon: { fontSize: 18, color: colors.muted },
-  tabText: { fontSize: 12, color: colors.muted },
+  frame: { flex: 1, flexDirection: 'row' },
+  main: { flex: 1, alignItems: 'center' },
+  body: { flex: 1, width: '100%', maxWidth: 960 },
+  sidebar: { width: 232, backgroundColor: colors.surface, borderRightWidth: 1, borderRightColor: colors.border, padding: space.lg, gap: 4 },
+  brand: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.sm, paddingBottom: space.xl },
+  logo: { width: 34, height: 34, borderRadius: 10, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
+  brandText: { fontSize: 18, fontWeight: '800', color: colors.text, letterSpacing: -0.3 },
+  navItem: { flexDirection: 'row', alignItems: 'center', gap: space.md, minHeight: 44, paddingHorizontal: space.md, borderRadius: 12 },
+  navHover: { backgroundColor: colors.card },
+  navActive: { backgroundColor: colors.accentSoft },
+  navText: { fontSize: 15, color: colors.muted },
+  syncBox: { flexDirection: 'row', alignItems: 'center', gap: space.sm, padding: space.md, borderRadius: 12, backgroundColor: colors.card },
+  tabBar: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.surface, paddingTop: 6, paddingBottom: Platform.OS === 'web' ? 6 : 22 },
+  tab: { flex: 1, alignItems: 'center', gap: 2 },
+  tabPill: { width: 56, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  tabPillActive: { backgroundColor: colors.accentSoft },
+  tabText: { fontSize: 11, color: colors.muted },
   tabTextActive: { color: colors.accent, fontWeight: '700' },
   back: { color: colors.accent, fontSize: 16, fontWeight: '600' },
 });
