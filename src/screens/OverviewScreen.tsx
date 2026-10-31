@@ -12,7 +12,7 @@ import type { AppState, MealPlan, Settings } from '../types';
 import { Button, Card, Eyebrow, Grid, Icon, Tag, WEEKDAYS, colors, euro, space, styles, useLayout, type IconName } from '../ui';
 import { CategoryBar } from './ExpensesScreen';
 
-export type OverviewTarget = 'plan' | 'einkauf' | 'ausgaben' | 'rezepte';
+export type OverviewTarget = 'plan' | 'einkauf' | 'ausgaben' | 'rezepte' | 'ki';
 
 /** Wie viele Zutaten eines Rezepts weder abgehakt noch im Vorrat sind. */
 function missingCount(recipeId: string, state: AppState): number {
@@ -133,7 +133,14 @@ export function OverviewScreen({ state, settings, plan, name, notice, syncStatus
         })}
       </Grid>
 
-      <Grid columns={isPhone ? 1 : 2}>
+      <Grid columns={isPhone ? 1 : 3}>
+        <Card onPress={() => onGo('ki')}>
+          <View style={local.sectionHead}>
+            <Text style={styles.sectionTitle}>KI-Assistent</Text>
+            <Icon name="zap" color={colors.accent} />
+          </View>
+          <Text style={styles.hint}>„Was koche ich aus meinem Vorrat?“ – Ideen, Rezepte und Spartipps.</Text>
+        </Card>
         <Card onPress={() => onGo('einkauf')}>
           <View style={local.sectionHead}>
             <Text style={styles.sectionTitle}>Einkaufsliste</Text>

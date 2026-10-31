@@ -25,12 +25,18 @@ Läuft im Browser am PC und auf dem iPhone als Symbol auf dem Home-Bildschirm. I
 - **Mehr:** Vorrat, Preise (eigene Preise überschreiben die Liste), Cloud-Sync, Einstellungen
   (inkl. Kindernamen), Sicherung als Datei.
 
-## Cloud-Sync (PC ↔ iPhone)
-Eigenes kostenloses Supabase-Projekt: `supabase-einrichtung.sql` im SQL-Editor ausführen, dann in der App
-unter Mehr → Cloud-Sync Project URL, Publishable/anon key und Haushalts-Code eintragen. Danach
-„Verbindungs-Link kopieren" und auf dem iPhone öffnen. Abgleich automatisch (Start, Rückkehr in die App,
-jede Minute, kurz nach jeder Änderung); bei Konflikten gewinnt die jüngere Änderung. Fotos liegen
-verkleinert in der Tabelle `wochenplan_fotos`. Zugriff nur über die SQL-Funktionen mit dem Haushalts-Code.
+## Konten, Besitzer und Abgleich
+Anmeldung mit E-Mail und Passwort (Supabase Auth). Neue Konten sind gesperrt, bis der Besitzer sie unter
+Mehr → Konto freigibt; dort kann er Konten auch sperren oder „in meinen Haushalt" holen (gemeinsame Woche).
+Besitzer wird, wer als Erstes mit dem alten Haushalts-Code (Gerät aus der Zeit vor den Konten) anmeldet –
+dabei werden die alten Daten übernommen. Schema: `supabase-einrichtung.sql`, dann `supabase-konten.sql`.
+Abgleich automatisch pro Haushalt (Start, Rückkehr in die App, jede Minute, kurz nach jeder Änderung).
+
+## KI-Assistent
+- Am PC: PC-Helfer → lokales Ollama (`qwen3:14b`, Bons mit `qwen2.5vl:7b`).
+- Unterwegs: Supabase Edge Function `supabase/functions/ki` → Google Gemini. Braucht das Secret
+  `GEMINI_API_KEY` (kostenloser Schlüssel aus Google AI Studio) unter Edge Functions → Secrets.
+  Nur angemeldete, freigegebene Konten dürfen sie nutzen.
 
 ## Preise
 `src/data/prices.ts`: Preis pro Zutat (€/kg, €/l, €/Stück, €/EL, €/TL). Reihenfolge: eigener Preis in der

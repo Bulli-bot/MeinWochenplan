@@ -40,7 +40,9 @@ function pickBackup(): Promise<AppState | null> {
 
 export type MoreView = 'einstellungen' | 'vorrat' | 'preise' | 'konto';
 
-export function MoreScreen({ state, syncStatus, onOpen, onRestore, onExpenses }: {
+export function MoreScreen({ state, syncStatus, onOpen, onRestore, onExpenses, onAi }: {
+  /** Nur auf dem Handy: KI-Assistent */
+  onAi?: () => void;
   state: AppState;
   /** Nur auf dem Handy: Ausgaben haben dort keinen eigenen Tab */
   onExpenses?: () => void;
@@ -59,8 +61,9 @@ export function MoreScreen({ state, syncStatus, onOpen, onRestore, onExpenses }:
       .catch(() => setHelper('aus – nur am PC nötig (Bons auslesen, Rezept-Links)'));
   }, []);
 
-  const entries: [MoreView | 'ausgaben', string, string, IconName][] = [
-    ...(onExpenses ? [['ausgaben', 'Ausgaben', 'Bons, Wochenverlauf, Budget', 'credit-card'] as [MoreView | 'ausgaben', string, string, IconName]] : []),
+  const entries: [MoreView | 'ausgaben' | 'ki', string, string, IconName][] = [
+    ...(onAi ? [['ki', 'KI-Assistent', 'Kochideen, Vorrat, Resteverwertung', 'zap'] as [MoreView | 'ki', string, string, IconName]] : []),
+    ...(onExpenses ? [['ausgaben', 'Ausgaben', 'Bons, Wochenverlauf, Budget', 'credit-card'] as [MoreView | 'ausgaben' | 'ki', string, string, IconName]] : []),
     ['vorrat', 'Vorrat', pantryCount ? `${pantryCount} Sachen zu Hause` : 'Was du schon hast, nicht mehr kaufen', 'archive'],
     ['preise', 'Preise', ownPrices ? `${ownPrices} eigene Preise` : 'Zutatenpreise ansehen und anpassen', 'tag'],
     ['konto', 'Konto und Abgleich', syncStatus.text, 'user'],
@@ -72,7 +75,7 @@ export function MoreScreen({ state, syncStatus, onOpen, onRestore, onExpenses }:
       <Text style={styles.h1}>Mehr</Text>
       <Card style={{ padding: 0, gap: 0 }}>
         {entries.map(([id, title, sub, icon], i) => (
-          <Pressable key={id} onPress={() => (id === 'ausgaben' ? onExpenses?.() : onOpen(id))} accessibilityRole="button"
+          <Pressable key={id} onPress={() => (id === 'ausgaben' ? onExpenses?.() : id === 'ki' ? onAi?.() : onOpen(id))} accessibilityRole="button"
             style={(st) => [local.entry, i > 0 && local.divider, hov(st) && { backgroundColor: colors.cardHover }]}>
             <View style={local.iconBox}><Icon name={icon} size={18} color={colors.accent} /></View>
             <View style={{ flex: 1 }}>

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Badge, BigPhoto, Field, Link, Thumb } from '../components';
-import { readReceipt } from '../pchelper';
+import { readReceiptAny } from '../ai';
 import { CATEGORY_LABEL, CATEGORY_ORDER, classify, learnPrice, sumBy, weekKey } from '../logic/receipt';
 import type { Purchase, PurchaseItem, SpendCategory, UserPrice } from '../types';
 import { Button, Chip, colors, euro, styles } from '../ui';
@@ -59,8 +59,8 @@ export function ExpensesScreen({ purchases, budget, plannedCost, planIngredients
       if (!photoId) return;
       onSave({ id: newId(), date: new Date().toISOString(), store: '', total: 0, items: [], photoId, status: 'wartet' });
       setNotice(Platform.OS === 'web' && /iPhone|iPad|Android/i.test(navigator.userAgent)
-        ? 'Bon gespeichert. Am PC unter Ausgaben auf „Am PC auslesen" tippen.'
-        : 'Bon gespeichert – jetzt „Am PC auslesen" tippen.');
+        ? 'Bon gespeichert – jetzt „Auslesen" tippen (am PC lokal, unterwegs per Gemini).'
+        : 'Bon gespeichert – jetzt „Auslesen" tippen.');
     } catch (e) {
       setNotice((e as Error).message);
     }
@@ -73,7 +73,7 @@ export function ExpensesScreen({ purchases, budget, plannedCost, planIngredients
     try {
       const image = await getPhotoData(p.photoId);
       if (!image) throw new Error('Foto noch nicht auf diesem Gerät – kurz warten, bis die Cloud es geladen hat.');
-      const r = await readReceipt(image);
+      const r = await readReceiptAny(image);
       const items: PurchaseItem[] = r.artikel.map((a) => ({ name: a.name, price: a.preis, quantity: a.kg ?? undefined, ...classify(a.name, planIngredients) }));
       const sum = Math.round(items.reduce((s, i) => s + i.price, 0) * 100) / 100;
       const gap = r.summe ? Math.round((r.summe - sum) * 100) / 100 : 0;
@@ -125,7 +125,7 @@ export function ExpensesScreen({ purchases, budget, plannedCost, planIngredients
             </View>
           </View>
           <View style={styles.row}>
-            <Pressable onPress={() => (busy ? null : ocr(p))} style={styles.small}><Text style={styles.smallText}>{busy === p.id ? 'Lese …' : 'Am PC auslesen'}</Text></Pressable>
+            <Pressable onPress={() => (busy ? null : ocr(p))} style={styles.small}><Text style={styles.smallText}>{busy === p.id ? 'Lese …' : 'Auslesen'}</Text></Pressable>
             <Pressable onPress={() => setOpenId(p.id)} style={styles.small}><Text style={styles.smallText}>Selbst eintragen</Text></Pressable>
           </View>
         </View>

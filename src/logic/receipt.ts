@@ -12,7 +12,7 @@ const ALIASES: [RegExp, string][] = [
   [/tomate/i, 'Tomate'],
   [/hackfl|hackfleisch|gemischtes hack|gehacktes/i, 'Hackfleisch (gemischt)'],
   [/rinderhack/i, 'Rinderhack'],
-  [/h(ä|ae)hn|haehn|huhn|geflügel/i, 'Hähnchenbrust'],
+  [/h(ä|ae)hn|haehn|huhn|hühn|geflügel|chicken/i, 'Hähnchenbrust'],
   [/pute/i, 'Putenbrust'],
   [/schinkenfl|fleischwurst/i, 'Fleischwurst'],
   [/hinterschink|kochschink|schinke|schinken/i, 'Kochschinken'],

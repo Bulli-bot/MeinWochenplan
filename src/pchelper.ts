@@ -42,3 +42,10 @@ export interface ImportedRecipe {
 export const readReceipt = (image: string) => call<ReceiptResult>('/bon', { image });
 export const importRecipe = (url: string) => call<ImportedRecipe>('/import', { url }, 30000);
 export const helperStatus = () => call<{ ok: boolean; ollama: boolean; visionModel: string | null }>('/status', undefined, 5000);
+
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+export const helperChat = (body: { system: string; messages: ChatMessage[]; json?: boolean }) =>
+  call<{ text: string; model: string }>('/ai', body, 180000);

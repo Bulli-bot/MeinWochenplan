@@ -1,6 +1,7 @@
 // PC-Helfer für MeinWochenplan – läuft nur auf diesem PC (127.0.0.1), nicht im Netz erreichbar.
 //   POST /bon     { image: "data:image/jpeg;base64,…" }  → Kassenbon mit lokalem Ollama-Bildmodell auslesen
 //   POST /import  { url: "https://…" }                   → Rezept (schema.org/Recipe) von einer Webseite holen
+//   POST /ai      { system, messages: [{role, content}], json? } → Antwort vom lokalen Textmodell (KI-Assistent)
 //   GET  /status                                          → läuft? welches Bildmodell?
 // Start: Doppelklick auf "PC-Helfer starten.cmd" oder `node pc-helfer.js`.
 const http = require('http');
@@ -8,6 +9,25 @@ const http = require('http');
 const PORT = Number(process.env.HELFER_PORT || 8093);
 const OLLAMA = (process.env.OLLAMA_URL || 'http://127.0.0.1:11435').replace(/\/+$/, '');
 const MAX_BODY = 8 * 1024 * 1024;
+
+/** Textmodell für den KI-Assistenten (qwen3:14b passt komplett in die Grafikkarte, Denkmodus aus) */
+const AI_MODEL = process.env.KI_MODELL || 'qwen3:14b';
+
+async function chat({ system, messages, json }) {
+  const res = await fetch(`${OLLAMA}/api/chat`, {
+    method: 'POST',
+    body: JSON.stringify({
+      model: AI_MODEL,
+      stream: false,
+      think: false,
+      ...(json ? { format: 'json' } : {}),
+      options: { temperature: 0.6, num_ctx: 8192 },
+      messages: [{ role: 'system', content: String(system || '') }, ...(messages || []).slice(-12).map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content).slice(0, 4000) }))],
+    }),
+  });
+  if (!res.ok) throw new Error(`Ollama antwortet mit ${res.status}`);
+  return { text: (await res.json()).message.content.trim(), model: AI_MODEL };
+}
 
 let visionModel = process.env.BON_MODELL ? { name: process.env.BON_MODELL, thinking: false } : null;
 /** Reihenfolge nach Test mit echten Bons: qwen2.5vl liest lange Bons am genauesten und schnellsten. */
@@ -168,9 +188,10 @@ http
         } catch {
           ollama = false;
         }
-        return send(res, 200, { ok: true, ollama, visionModel: model });
+        return send(res, 200, { ok: true, ollama, visionModel: model, textModel: AI_MODEL });
       }
       if (req.method === 'POST' && path === '/bon') return send(res, 200, await readReceipt((await readBody(req)).image));
+      if (req.method === 'POST' && path === '/ai') return send(res, 200, await chat(await readBody(req)));
       if (req.method === 'POST' && path === '/import') return send(res, 200, await importRecipe((await readBody(req)).url));
       send(res, 404, { error: 'Unbekannt' });
     } catch (e) {

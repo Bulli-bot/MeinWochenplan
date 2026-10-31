@@ -8,6 +8,7 @@ import { BUILTIN_IDS, RECIPE_BY_ID, rebuildCatalog } from './src/data/recipes';
 import { findSwap, generatePlan, kidTally, planCost, type PlanContext } from './src/logic/generator';
 import { deletePhotoData, newPhotoId, pickPhoto, savePhotoData } from './src/photos';
 import { AccountScreen } from './src/screens/AccountScreen';
+import { AiScreen } from './src/screens/AiScreen';
 import { AuthScreen, PendingScreen } from './src/screens/AuthScreen';
 import { ExpensesScreen } from './src/screens/ExpensesScreen';
 import { MoreScreen, type MoreView } from './src/screens/MoreScreen';
@@ -24,12 +25,12 @@ import { DEFAULT_SETTINGS, EMPTY_STATE, loadState, saveState } from './src/stora
 import type { AppState, CustomRecipe, Settings } from './src/types';
 import { Button, Icon, colors, hov, space, styles, useLayout, type IconName } from './src/ui';
 
-type Tab = 'start' | 'plan' | 'rezepte' | 'einkauf' | 'ausgaben' | 'mehr';
+type Tab = 'start' | 'plan' | 'rezepte' | 'einkauf' | 'ausgaben' | 'ki' | 'mehr';
 const TABS: [Tab, string, IconName][] = [
   ['start', 'Übersicht', 'grid'], ['plan', 'Woche', 'calendar'], ['rezepte', 'Rezepte', 'book-open'],
-  ['einkauf', 'Einkauf', 'shopping-cart'], ['ausgaben', 'Ausgaben', 'credit-card'], ['mehr', 'Mehr', 'menu'],
+  ['einkauf', 'Einkauf', 'shopping-cart'], ['ausgaben', 'Ausgaben', 'credit-card'], ['ki', 'KI-Assistent', 'zap'], ['mehr', 'Mehr', 'menu'],
 ];
-/** Auf dem Handy ist unten nur Platz für fünf – Ausgaben gibt es dort über die Übersicht und „Mehr“. */
+/** Auf dem Handy ist unten nur Platz für fünf – Ausgaben und KI gibt es dort über die Übersicht und „Mehr“. */
 const PHONE_TABS: Tab[] = ['start', 'plan', 'rezepte', 'einkauf', 'mehr'];
 const RECENT_LIMIT = 21;
 const LOCAL_OWNER_KEY = 'meinwochenplan:local-owner';
@@ -304,6 +305,8 @@ export default function App() {
         footer={<Text style={[styles.hint, syncStatus.kind === 'fehler' && { color: colors.danger }]}>☁ {syncStatus.text}</Text>}
       />
     );
+  } else if (tab === 'ki') {
+    body = <AiScreen state={state} settings={settings} onRecipeDraft={(r) => setEditRecipe(r)} />;
   } else if (tab === 'rezepte') {
     body = <RecipesScreen context={context(settings)} favourites={state.favourites} filters={filters} onFilters={setFilters} onOpen={setOpenRecipe} onNew={() => setEditRecipe('neu')} />;
   } else if (tab === 'einkauf') {
@@ -355,7 +358,7 @@ export default function App() {
     body = <AccountScreen profile={profile} syncStatus={syncStatus} onSyncNow={syncNow} onSignOut={signOut} onBack={() => setMoreView(null)} onProfileChanged={auth.refresh} />;
   } else {
     body = <MoreScreen state={state} syncStatus={syncStatus} onOpen={setMoreView} onRestore={(s) => { swapSeen.current = {}; setState(s); }}
-      onExpenses={layout.isPhone ? () => setTab('ausgaben') : undefined} />;
+      onExpenses={layout.isPhone ? () => setTab('ausgaben') : undefined} onAi={layout.isPhone ? () => setTab('ki') : undefined} />;
   }
 
   const showNav = !!settings && !!plan && !openRecipe && !editRecipe && pickDay === null;
