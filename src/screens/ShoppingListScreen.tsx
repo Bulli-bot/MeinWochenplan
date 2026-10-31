@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 import { ingredientCost } from '../data/prices';
+import { sendToBring } from '../bring';
 import { applyPantry } from '../logic/pantry';
 import { CATEGORY_ORDER, buildShoppingList, formatAmount, isBasic, shoppingListAsText, shoppingTrip, type ShoppingItem } from '../logic/shoppingList';
 import type { MealPlan, PantryItem, Settings, ShopExtra } from '../types';
@@ -110,6 +111,7 @@ export function ShoppingListScreen({
   const [notice, setNotice] = useState<string | null>(null);
   const [newItem, setNewItem] = useState('');
   const [editing, setEditing] = useState<string | null>(null);
+  const [bringBusy, setBringBusy] = useState(false);
   const done = items.filter((i) => checked.includes(i.key)).length + extras.filter((x) => x.done).length;
   const total = items.length + extras.length;
   const openCost = items.filter((i) => !checked.includes(i.key)).reduce((s, i) => s + itemCost(i), 0);
@@ -154,6 +156,27 @@ export function ShoppingListScreen({
       return;
     }
     await Share.share({ message: text }).catch(() => setNotice('Teilen ist hier nicht verfügbar.'));
+  };
+
+  const toBring = async () => {
+    const list = [
+      ...items.filter((i) => !checked.includes(i.key)).map((i) => ({ name: i.name, spec: formatAmount(i.amount, i.unit) })),
+      ...extras.filter((x) => !x.done).map((x) => ({ name: x.name, spec: x.amount ?? '' })),
+    ];
+    if (!list.length) {
+      setNotice('Nichts Offenes zum Senden – alles im Wagen.');
+      return;
+    }
+    setBringBusy(true);
+    setNotice(null);
+    try {
+      const r = await sendToBring(list);
+      setNotice(`${r.added} Artikel an „${r.list}“ geschickt. Jetzt in der Bring!-App ansehen – dort auch die Prospekte.`);
+    } catch (e) {
+      setNotice((e as Error).message);
+    } finally {
+      setBringBusy(false);
+    }
   };
 
   const renderTile = (t: Tile) => (
@@ -257,9 +280,10 @@ export function ShoppingListScreen({
       ) : null}
 
       {notice ? <Text style={styles.hint}>{notice}</Text> : null}
-      <Button label="Einkauf erledigt – Bon fotografieren" icon="camera" onPress={onShopped} />
+      <Button label={bringBusy ? 'Sende an Bring! …' : 'An Bring! senden'} icon="shopping-bag" onPress={() => (bringBusy ? null : toBring())} />
+      <Button label="Einkauf erledigt – Bon fotografieren" variant="secondary" icon="camera" onPress={onShopped} />
       <View style={styles.row}>
-        <View style={{ flex: 1, minWidth: 150 }}><Button label="Als Text teilen" variant="secondary" icon="share" onPress={share} /></View>
+        <View style={{ flex: 1, minWidth: 150 }}><Button label="Als Text teilen" variant="ghost" icon="share" onPress={share} /></View>
         <View style={{ flex: 1, minWidth: 150 }}><Button label="Haken zurücksetzen" variant="ghost" icon="rotate-ccw" onPress={onReset} /></View>
       </View>
     </ScrollView>
