@@ -39,7 +39,9 @@ export function authError(message: string): string {
   if (/email not confirmed/i.test(message)) return 'Bitte zuerst den Link in der Bestätigungs-Mail öffnen.';
   if (/already registered|already exists/i.test(message)) return 'Für diese E-Mail gibt es schon ein Konto – bitte anmelden.';
   if (/password should be at least/i.test(message)) return 'Das Passwort braucht mindestens 6 Zeichen.';
-  if (/rate limit|too many/i.test(message)) return 'Zu viele Versuche – bitte kurz warten.';
+  // Der kostenlose Supabase-Mailversand schickt nur wenige Mails pro Stunde
+  if (/email rate limit/i.test(message)) return 'Gerade wurden zu viele Mails verschickt. In etwa einer Stunde klappt „Passwort vergessen“ wieder – oder den Link aus der letzten Mail nehmen.';
+  if (/rate limit|too many/i.test(message)) return 'Zu viele Versuche – bitte ein paar Minuten warten.';
   if (/failed to fetch|network/i.test(message)) return 'Keine Verbindung – Internet prüfen.';
   if (/nicht freigegeben/i.test(message)) return 'Dein Konto ist noch nicht freigegeben.';
   return message;
