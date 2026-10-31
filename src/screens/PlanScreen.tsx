@@ -42,12 +42,10 @@ export function WeekNav({ plan, relation, onPrev, onNext }: WeekNavProps) {
 }
 
 /** Kalender eines Monats mit allen geplanten Gerichten (aktuelle und gespeicherte Wochen). */
-function MonthView({ plans, onOpen }: { plans: MealPlan[]; onOpen: (recipeId: string) => void }) {
+function MonthView({ plans, startAt, onOpen }: { plans: MealPlan[]; startAt: Date; onOpen: (recipeId: string) => void }) {
   const { isPhone } = useLayout();
-  const [month, setMonth] = useState(() => {
-    const d = new Date();
-    return new Date(d.getFullYear(), d.getMonth(), 1);
-  });
+  // Startet beim Monat der angezeigten Woche (Plan für Anfang November → November)
+  const [month, setMonth] = useState(() => new Date(startAt.getFullYear(), startAt.getMonth(), 1));
   // Tag (JJJJ-MM-TT) → Gericht; der erste Plan in der Liste gewinnt (aktueller vor gespeicherten)
   const byDay = useMemo(() => {
     const map = new Map<string, { recipeId: string; kind?: string }>();
@@ -176,7 +174,7 @@ export function PlanScreen({
         </View>
       </View>
 
-      {mode === 'monat' ? <MonthView plans={allPlans} onOpen={onOpen} /> : (
+      {mode === 'monat' ? <MonthView plans={allPlans} startAt={planMonday(plan)} onOpen={onOpen} /> : (
         <>
           <WeekNav {...nav} />
 
