@@ -1,7 +1,7 @@
 import type { Session } from '@supabase/supabase-js';
 import { useCallback, useEffect, useState } from 'react';
 import { claimLegacy, legacyCode } from './cloud';
-import { authError, rpc, supabase, type Profile } from './supabase';
+import { RECOVERY_IN_URL, authError, rpc, supabase, type Profile } from './supabase';
 
 export interface AuthState {
   loading: boolean;
@@ -9,6 +9,9 @@ export interface AuthState {
   profile: Profile | null;
   /** Hinweis nach der Übernahme alter Daten (z. B. „Du bist jetzt Besitzer") */
   notice: string | null;
+  /** Über den Link aus der Mail angemeldet → neues Passwort festlegen */
+  recovery: boolean;
+  finishRecovery: () => void;
   refresh: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -19,6 +22,7 @@ export function useAuth(): AuthState {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [recovery, setRecovery] = useState(RECOVERY_IN_URL);
 
   const loadProfile = useCallback(async (s: Session | null) => {
     if (!s) {
@@ -51,6 +55,7 @@ export function useAuth(): AuthState {
     });
     const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
       setSession(s);
+      if (event === 'PASSWORD_RECOVERY') setRecovery(true);
       if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'USER_UPDATED') loadProfile(s);
     });
     return () => {
@@ -64,6 +69,8 @@ export function useAuth(): AuthState {
     session,
     profile,
     notice,
+    recovery,
+    finishRecovery: () => setRecovery(false),
     refresh: () => loadProfile(session),
     signOut: async () => {
       await supabase.auth.signOut();

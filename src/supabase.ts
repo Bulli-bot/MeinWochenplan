@@ -10,12 +10,17 @@ import { Platform } from 'react-native';
 export const SUPABASE_URL = 'https://futaviriujnoahzhznoe.supabase.co';
 export const SUPABASE_KEY = 'sb_publishable_P0hAfHHtyDt1RLdxgRp7pw_-Qf1XsoY';
 
+/** Kommt die Seite aus einem „Passwort zurücksetzen“-Link? (vor createClient lesen – der entfernt den Hash) */
+export const RECOVERY_IN_URL = Platform.OS === 'web' && typeof window !== 'undefined' && /type=recovery/.test(window.location.hash);
+
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: {
     storage: Platform.OS === 'web' ? undefined : AsyncStorage,
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: Platform.OS === 'web',
+    // „implicit“: Mail-Links funktionieren auch auf einem anderen Gerät als dem, auf dem sie angefordert wurden
+    flowType: 'implicit',
   },
 });
 

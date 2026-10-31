@@ -9,7 +9,7 @@ import { findSwap, generatePlan, kidTally, planCost, type PlanContext } from './
 import { deletePhotoData, newPhotoId, pickPhoto, savePhotoData } from './src/photos';
 import { AccountScreen } from './src/screens/AccountScreen';
 import { AiScreen } from './src/screens/AiScreen';
-import { AuthScreen, PendingScreen } from './src/screens/AuthScreen';
+import { AuthScreen, NewPasswordScreen, PendingScreen } from './src/screens/AuthScreen';
 import { ExpensesScreen } from './src/screens/ExpensesScreen';
 import { MoreScreen, type MoreView } from './src/screens/MoreScreen';
 import { OverviewScreen } from './src/screens/OverviewScreen';
@@ -198,6 +198,14 @@ export default function App() {
   }
 
   if (!auth.session) return <View style={local.root}><StatusBar style="light" /><AuthScreen /></View>;
+  if (auth.recovery) {
+    return (
+      <View style={local.root}>
+        <StatusBar style="light" />
+        <NewPasswordScreen email={auth.session.user.email ?? ''} onDone={auth.finishRecovery} />
+      </View>
+    );
+  }
   if (!auth.profile?.approved) {
     return (
       <View style={local.root}>

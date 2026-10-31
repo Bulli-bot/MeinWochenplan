@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { resetPassword, signIn, signUp } from '../auth';
+import { authError, supabase } from '../supabase';
 import { Field } from '../components';
 import { Button, Card, Icon, colors, space, styles } from '../ui';
 
@@ -62,6 +63,38 @@ export function AuthScreen() {
           <Button label={mode === 'login' ? 'Noch kein Konto? Registrieren' : 'Schon ein Konto? Anmelden'} variant="ghost"
             onPress={() => { setMode(mode === 'login' ? 'register' : 'login'); setMsg(null); }} />
           {mode === 'login' ? <Text onPress={forgot} style={[styles.hint, local.link]}>Passwort vergessen?</Text> : null}
+        </Card>
+      </View>
+    </ScrollView>
+  );
+}
+
+/** Nach dem Link aus der „Passwort zurücksetzen“-Mail: neues Passwort festlegen. */
+export function NewPasswordScreen({ email, onDone }: { email: string; onDone: () => void }) {
+  const [password, setPassword] = useState('');
+  const [repeat, setRepeat] = useState('');
+  const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    if (password.length < 6) return setMsg({ text: 'Das Passwort braucht mindestens 6 Zeichen.', error: true });
+    if (password !== repeat) return setMsg({ text: 'Die beiden Passwörter sind nicht gleich.', error: true });
+    setBusy(true);
+    const { error } = await supabase.auth.updateUser({ password });
+    setBusy(false);
+    if (error) return setMsg({ text: authError(error.message), error: true });
+    onDone();
+  };
+  return (
+    <ScrollView style={styles.screen} contentContainerStyle={local.wrap}>
+      <View style={local.box}>
+        <View style={local.logo}><Icon name="key" size={26} color={colors.onAccent} /></View>
+        <Text style={[styles.h1, { textAlign: 'center' }]}>Neues Passwort</Text>
+        <Text style={[styles.sub, { textAlign: 'center' }]}>Für {email}. Tipp: Lass es dir vom iPhone beim Speichern im Schlüsselbund merken.</Text>
+        <Card style={{ gap: space.md, marginTop: space.lg }}>
+          <Field label="Neues Passwort" value={password} onChangeText={setPassword} secureTextEntry autoComplete="new-password" placeholder="mindestens 6 Zeichen" />
+          <Field label="Nochmal eingeben" value={repeat} onChangeText={setRepeat} secureTextEntry autoComplete="new-password" onSubmitEditing={() => (busy ? null : save())} />
+          <Button label={busy ? 'Speichere …' : 'Passwort speichern'} icon="check" onPress={() => (busy ? null : save())} />
+          {msg ? <Text style={msg.error ? styles.error : styles.hint}>{msg.text}</Text> : null}
         </Card>
       </View>
     </ScrollView>
