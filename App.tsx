@@ -154,6 +154,8 @@ export default function App() {
         checkedItems: [],
         cooked: [],
         shopExtras: prev.shopExtras.filter((x) => !x.done),
+        shopHidden: [],
+        shopAmounts: {},
       };
     });
   };
@@ -415,8 +417,16 @@ export default function App() {
         onAddExtra={(n) => addExtra(n)}
         onToggleExtra={(id) => setState((prev) => ({ ...prev, shopExtras: prev.shopExtras.map((x) => (x.id === id ? { ...x, done: !x.done } : x)) }))}
         onRemoveExtra={(id) => setState((prev) => ({ ...prev, shopExtras: prev.shopExtras.filter((x) => x.id !== id) }))}
+        onEditExtra={(id, name, amount) => setState((prev) => ({ ...prev, shopExtras: prev.shopExtras.map((x) => (x.id === id ? { ...x, name, amount: amount || undefined } : x)) }))}
+        hidden={state.shopHidden ?? []}
+        amounts={state.shopAmounts ?? {}}
+        onHide={(key, hide) => setState((prev) => ({ ...prev, shopHidden: hide ? [...(prev.shopHidden ?? []), key] : (prev.shopHidden ?? []).filter((k) => k !== key) }))}
+        onAmount={(key, text) => setState((prev) => {
+          const { [key]: _, ...rest } = prev.shopAmounts ?? {};
+          return { ...prev, shopAmounts: text.trim() ? { ...rest, [key]: text.trim() } : rest };
+        })}
         onToggle={(key) => toggleIn('checkedItems', key)}
-        onReset={() => setState((prev) => ({ ...prev, checkedItems: [] }))}
+        onReset={() => setState((prev) => ({ ...prev, checkedItems: [], shopExtras: prev.shopExtras.map((x) => ({ ...x, done: false })) }))}
         onHave={(name) => setState((prev) => ({ ...prev, pantry: [...prev.pantry.filter((p) => p.name !== name), { name }] }))}
         onShopped={() => setTab('ausgaben')}
       />

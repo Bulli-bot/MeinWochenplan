@@ -114,6 +114,10 @@ export interface AppState {
   bonNames: Record<string, BonName>;
   /** Selbst hinzugefügte Einkaufsartikel (nicht aus dem Plan) */
   shopExtras: ShopExtra[];
+  /** Plan-Artikel, die diese Woche nicht gekauft werden (Kachel gelöscht) */
+  shopHidden?: string[];
+  /** Selbst geänderte Mengen der Plan-Artikel, z. B. „2 Packungen“ */
+  shopAmounts?: Record<string, string>;
 }
 
 export interface ShopExtra {

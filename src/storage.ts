@@ -43,6 +43,8 @@ export const EMPTY_STATE: AppState = {
   archive: [],
   bonNames: {},
   shopExtras: [],
+  shopHidden: [],
+  shopAmounts: {},
 };
 
 export async function loadState(): Promise<AppState> {

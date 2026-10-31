@@ -3,7 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 import { RECIPES, RECIPE_BY_ID } from '../data/recipes';
 import { costWithSwap, eligibleRecipes, portionCost, type PlanContext } from '../logic/generator';
 import type { MealPlan, Protein, Recipe } from '../types';
-import { Button, Chip, WEEKDAYS_LONG, colors, euro, styles } from '../ui';
+import { Button, Chip, Icon, WEEKDAYS_LONG, colors, euro, hov, styles } from '../ui';
 
 type Sort = 'preis' | 'zeit' | 'name';
 const SORTS: [Sort, string][] = [['preis', 'Preis'], ['zeit', 'Kochzeit'], ['name', 'Name']];
@@ -18,8 +18,24 @@ export interface RecipeFilters {
   sort: Sort;
   onlyMatching: boolean;
   onlyKids: boolean;
+  /** Aufgeklappte Kategorien */
+  openGroups?: string[];
 }
-export const DEFAULT_FILTERS: RecipeFilters = { query: '', protein: null, sort: 'preis', onlyMatching: false, onlyKids: false };
+export const DEFAULT_FILTERS: RecipeFilters = { query: '', protein: null, sort: 'preis', onlyMatching: false, onlyKids: false, openGroups: [] };
+
+/** Kategorien nach Beilage – Suppen und Süßes bekommen eigene Gruppen. */
+export const GROUPS = ['Nudeln', 'Kartoffeln', 'Reis', 'Brot, Pizza & Wraps', 'Suppen & Eintöpfe', 'Süßes', 'Sonstiges'] as const;
+export function recipeGroup(r: Recipe): (typeof GROUPS)[number] {
+  if (/suppe|minestrone|eintopf|topf|dal/i.test(r.name)) return 'Suppen & Eintöpfe';
+  if (/pfannkuchen|milchreis|kaiserschmarrn|waffel|grießbrei/i.test(r.name)) return 'Süßes';
+  switch (r.carb) {
+    case 'nudeln': return 'Nudeln';
+    case 'kartoffeln': return 'Kartoffeln';
+    case 'reis': return 'Reis';
+    case 'brot': return 'Brot, Pizza & Wraps';
+    default: return 'Sonstiges';
+  }
+}
 
 const compare: Record<Sort, (a: Recipe, b: Recipe) => number> = {
   preis: (a, b) => a.pricePerPortion - b.pricePerPortion || a.name.localeCompare(b.name, 'de'),
@@ -47,6 +63,7 @@ export function RecipesScreen({ context, favourites, filters, onFilters, onOpen,
   onNew?: () => void;
 }) {
   const { query, protein, sort, onlyMatching, onlyKids } = filters;
+  const openGroups = filters.openGroups ?? [];
   const set = (patch: Partial<RecipeFilters>) => onFilters({ ...filters, ...patch });
   const { householdSize, weeklyBudget } = context.settings;
 
@@ -63,6 +80,35 @@ export function RecipesScreen({ context, favourites, filters, onFilters, onOpen,
       (!onlyKids || r.vibes.includes('kinder')) &&
       (!needle || r.name.toLowerCase().includes(needle) || r.ingredients.some((x) => x.name.toLowerCase().includes(needle))),
   ).sort(compare[sort]);
+
+  const renderRecipe = (r: Recipe) => {
+    const planTotal = pickFor ? costWithSwap(pickFor.plan, pickFor.day, r, householdSize, RECIPE_BY_ID) : 0;
+    const isCurrent = r.id === currentId;
+    return (
+      <Pressable key={r.id} onPress={() => onOpen(r.id)} style={[styles.card, local.row, isCurrent && local.current]} accessibilityRole="button">
+        <View style={local.info}>
+          <Text style={local.name}>{r.name}{favourites.includes(r.id) ? ' ♥' : ''}</Text>
+          <Text style={styles.hint}>
+            {r.minutes} Min. · {PROTEIN_LABELS[r.protein]}{r.vibes.includes('kinder') ? ' · kinderfreundlich' : ''}{matchingIds.has(r.id) ? '' : ' · passt nicht zu deinen Einstellungen'}
+          </Text>
+          {pickFor ? (
+            <Text style={[styles.hint, planTotal > weeklyBudget && local.over]}>
+              {isCurrent ? 'Steht schon an diesem Tag' : inPlan.has(r.id) ? 'Steht schon an einem anderen Tag' : `Woche dann: ${euro(planTotal)} von ${euro(weeklyBudget)}`}
+            </Text>
+          ) : null}
+        </View>
+        <View style={local.prices}>
+          <Text style={local.price}>{euro(r.pricePerPortion)}</Text>
+          <Text style={styles.hint}>{euro(portionCost(r, householdSize))}</Text>
+          {pickFor && !isCurrent ? (
+            <Pressable onPress={() => pickFor.onPick(r.id)} style={local.pick} accessibilityRole="button" accessibilityLabel={`${r.name} nehmen`}>
+              <Text style={local.pickText}>Nehmen</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </Pressable>
+    );
+  };
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
@@ -114,34 +160,37 @@ export function RecipesScreen({ context, favourites, filters, onFilters, onOpen,
         {shown.length} angezeigt · Preis pro Portion, rechts für {householdSize} {householdSize === 1 ? 'Person' : 'Personen'}
       </Text>
 
-      {shown.map((r) => {
-        const planTotal = pickFor ? costWithSwap(pickFor.plan, pickFor.day, r, householdSize, RECIPE_BY_ID) : 0;
-        const isCurrent = r.id === currentId;
+      {(() => {
+        const groups = GROUPS.map((g) => [g, shown.filter((r) => recipeGroup(r) === g)] as const).filter(([, list]) => list.length);
+        // Beim Suchen und beim Aussuchen für einen Tag alles offen, sonst nur die aufgeklappten Kategorien
+        const allOpen = !!needle || !!pickFor;
+        const toggleGroup = (g: string) => set({ openGroups: openGroups.includes(g) ? openGroups.filter((x) => x !== g) : [...openGroups, g] });
         return (
-          <Pressable key={r.id} onPress={() => onOpen(r.id)} style={[styles.card, local.row, isCurrent && local.current]} accessibilityRole="button">
-            <View style={local.info}>
-              <Text style={local.name}>{r.name}{favourites.includes(r.id) ? ' ♥' : ''}</Text>
-              <Text style={styles.hint}>
-                {r.minutes} Min. · {PROTEIN_LABELS[r.protein]}{r.vibes.includes('kinder') ? ' · kinderfreundlich' : ''}{matchingIds.has(r.id) ? '' : ' · passt nicht zu deinen Einstellungen'}
-              </Text>
-              {pickFor ? (
-                <Text style={[styles.hint, planTotal > weeklyBudget && local.over]}>
-                  {isCurrent ? 'Steht schon an diesem Tag' : inPlan.has(r.id) ? 'Steht schon an einem anderen Tag' : `Woche dann: ${euro(planTotal)} von ${euro(weeklyBudget)}`}
-                </Text>
-              ) : null}
-            </View>
-            <View style={local.prices}>
-              <Text style={local.price}>{euro(r.pricePerPortion)}</Text>
-              <Text style={styles.hint}>{euro(portionCost(r, householdSize))}</Text>
-              {pickFor && !isCurrent ? (
-                <Pressable onPress={() => pickFor.onPick(r.id)} style={local.pick} accessibilityRole="button" accessibilityLabel={`${r.name} nehmen`}>
-                  <Text style={local.pickText}>Nehmen</Text>
-                </Pressable>
-              ) : null}
-            </View>
-          </Pressable>
+          <>
+            {!allOpen ? (
+              <View style={styles.row}>
+                <Chip label="Alle aufklappen" selected={false} onPress={() => set({ openGroups: groups.map(([g]) => g) })} />
+                <Chip label="Alle zuklappen" selected={false} onPress={() => set({ openGroups: [] })} />
+              </View>
+            ) : null}
+            {groups.map(([g, list]) => {
+              const open = allOpen || openGroups.includes(g);
+              const cheapest = Math.min(...list.map((r) => r.pricePerPortion));
+              return (
+                <View key={g} style={{ gap: 10 }}>
+                  <Pressable onPress={() => toggleGroup(g)} disabled={allOpen} accessibilityRole="button" accessibilityState={{ expanded: open }}
+                    style={(st) => [local.group, hov(st) && !allOpen && { backgroundColor: colors.cardHover }]}>
+                    <Text style={local.groupTitle}>{g}</Text>
+                    <Text style={styles.hint}>{list.length} {list.length === 1 ? 'Rezept' : 'Rezepte'} · ab {euro(cheapest)}</Text>
+                    {!allOpen ? <Icon name={open ? 'chevron-up' : 'chevron-down'} /> : null}
+                  </Pressable>
+                  {open ? list.map(renderRecipe) : null}
+                </View>
+              );
+            })}
+          </>
         );
-      })}
+      })()}
       {shown.length === 0 ? <Text style={styles.hint}>Keine Rezepte gefunden.</Text> : null}
     </ScrollView>
   );
@@ -149,6 +198,8 @@ export function RecipesScreen({ context, favourites, filters, onFilters, onOpen,
 
 const local = StyleSheet.create({
   back: { color: colors.accent, fontSize: 16, fontWeight: '600' },
+  group: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 52, paddingHorizontal: 14, borderRadius: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  groupTitle: { flex: 1, fontSize: 17, fontWeight: '700', color: colors.text },
   search: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, color: colors.text },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   current: { borderColor: colors.accent, borderWidth: 2 },
