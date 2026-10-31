@@ -1,11 +1,14 @@
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import { deleteCloudPhoto, loadCloudConfig, saveCloudConfig, uploadPhoto, useCloudSync } from './src/cloud';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAuth } from './src/auth';
+import { deleteCloudPhoto, uploadPhoto, useCloudSync } from './src/cloud';
 import { BUILTIN_IDS, RECIPE_BY_ID, rebuildCatalog } from './src/data/recipes';
 import { findSwap, generatePlan, kidTally, planCost, type PlanContext } from './src/logic/generator';
 import { deletePhotoData, newPhotoId, pickPhoto, savePhotoData } from './src/photos';
-import { CloudScreen, readConnectLink } from './src/screens/CloudScreen';
+import { AccountScreen } from './src/screens/AccountScreen';
+import { AuthScreen, PendingScreen } from './src/screens/AuthScreen';
 import { ExpensesScreen } from './src/screens/ExpensesScreen';
 import { MoreScreen, type MoreView } from './src/screens/MoreScreen';
 import { OverviewScreen } from './src/screens/OverviewScreen';
@@ -29,6 +32,7 @@ const TABS: [Tab, string, IconName][] = [
 /** Auf dem Handy ist unten nur Platz für fünf – Ausgaben gibt es dort über die Übersicht und „Mehr“. */
 const PHONE_TABS: Tab[] = ['start', 'plan', 'rezepte', 'einkauf', 'mehr'];
 const RECENT_LIMIT = 21;
+const LOCAL_OWNER_KEY = 'meinwochenplan:local-owner';
 
 export default function App() {
   const [state, setState] = useState<AppState>(EMPTY_STATE);
@@ -42,21 +46,15 @@ export default function App() {
   const [pickDay, setPickDay] = useState<number | null>(null);
   const [filters, setFilters] = useState<RecipeFilters>(DEFAULT_FILTERS);
   const [pickFilters, setPickFilters] = useState<RecipeFilters>({ ...DEFAULT_FILTERS, onlyMatching: true });
-  const [cloudVersion, setCloudVersion] = useState(0);
+  /** Konto, für das der Abgleich läuft – erst gesetzt, wenn die lokalen Daten zu diesem Konto passen */
+  const [syncUser, setSyncUser] = useState<string | null>(null);
+  const auth = useAuth();
   const firstSave = useRef(true);
   /** Pro Tag die Rezepte, die beim Tauschen schon dran waren – damit nicht dieselben zurückkommen. */
   const swapSeen = useRef<Record<number, string[]>>({});
 
   useEffect(() => {
     (async () => {
-      await loadCloudConfig();
-      // Verbindungs-Link vom anderen Gerät (…#verbinden=…) → Cloud-Stand übernehmen
-      const linked = readConnectLink();
-      if (linked) {
-        await saveCloudConfig(linked, false);
-        setTab('mehr');
-        setMoreView('cloud');
-      }
       setState(await loadState());
       setLoaded(true);
     })();
@@ -75,7 +73,35 @@ export default function App() {
     swapSeen.current = {};
     setState(next);
   };
-  const { status: syncStatus, syncNow } = useCloudSync(state, loaded, replaceFromCloud, cloudVersion);
+  // Lokale Daten gehören immer zu genau einem Konto. Meldet sich jemand anderes an, wird vorher geleert,
+  // damit nichts in den falschen Haushalt hochgeladen wird.
+  const approvedUser = auth.session && auth.profile?.approved ? auth.session.user.id : null;
+  useEffect(() => {
+    if (!loaded) return;
+    if (!approvedUser) {
+      setSyncUser(null);
+      return;
+    }
+    (async () => {
+      const owner = await AsyncStorage.getItem(LOCAL_OWNER_KEY).catch(() => null);
+      if (owner && owner !== approvedUser) {
+        swapSeen.current = {};
+        setState(EMPTY_STATE);
+      }
+      await AsyncStorage.setItem(LOCAL_OWNER_KEY, approvedUser).catch(() => {});
+      setSyncUser(approvedUser);
+    })();
+  }, [approvedUser, loaded]);
+  const { status: syncStatus, syncNow } = useCloudSync(state, loaded, replaceFromCloud, syncUser);
+
+  const signOut = async () => {
+    await auth.signOut();
+    swapSeen.current = {};
+    setState(EMPTY_STATE);
+    setTab('start');
+    setMoreView(null);
+    setOpenRecipe(null);
+  };
 
   // Eigene Rezepte und Preise in den Katalog rechnen, bevor irgendetwas gerendert wird.
   rebuildCatalog(state.customRecipes, state.userPrices);
@@ -162,7 +188,7 @@ export default function App() {
     setState((prev) => ({ ...prev, photos: { ...prev.photos, [recipeId]: (prev.photos[recipeId] ?? []).filter((p) => p.id !== id) } }));
   };
 
-  if (!loaded) {
+  if (!loaded || auth.loading || (approvedUser && syncUser !== approvedUser)) {
     return (
       <View style={[local.root, local.center]}>
         <ActivityIndicator color={colors.accent} />
@@ -170,28 +196,32 @@ export default function App() {
     );
   }
 
+  if (!auth.session) return <View style={local.root}><StatusBar style="light" /><AuthScreen /></View>;
+  if (!auth.profile?.approved) {
+    return (
+      <View style={local.root}>
+        <StatusBar style="light" />
+        <PendingScreen email={auth.session.user.email ?? ''} onRefresh={auth.refresh} onSignOut={signOut} />
+      </View>
+    );
+  }
+  const profile = auth.profile;
+
   const { settings, plan } = state;
-  const isFirstRun = !settings || !plan;
-  const cloudScreen = (back: () => void) => (
-    <CloudScreen status={syncStatus} onChanged={() => setCloudVersion((v) => v + 1)} onSyncNow={syncNow} onBack={back} />
-  );
+  // Erster Start: kurz warten, ob die Cloud schon eine Woche hat, statt sofort das Formular zu zeigen.
+  const isFirstRun = (!settings || !plan) && syncStatus.kind !== 'läuft';
 
   let body;
-  if (isFirstRun) {
-    body = moreView === 'cloud' ? cloudScreen(() => setMoreView(null)) : (
+  if (!settings || !plan) {
+    body = isFirstRun ? (
       <SettingsScreen
         initial={settings ?? DEFAULT_SETTINGS}
         isFirstRun
         onSave={createPlan}
         error={error}
-        header={(
-          <View style={[styles.card, { gap: 8 }]}>
-            <Text style={styles.hint}>Schon auf dem PC eingerichtet? Dann hier die Cloud verbinden und die Woche übernehmen.</Text>
-            <Button label="Mit Cloud verbinden" variant="secondary" onPress={() => setMoreView('cloud')} />
-          </View>
-        )}
+        header={auth.notice ? <View style={[styles.card, { gap: 8 }]}><Text style={styles.hint}>{auth.notice}</Text></View> : undefined}
       />
-    );
+    ) : <View style={[local.root, local.center]}><ActivityIndicator color={colors.accent} /></View>;
   } else if (editRecipe) {
     body = (
       <RecipeEditScreen
@@ -253,7 +283,7 @@ export default function App() {
     );
   } else if (tab === 'start') {
     body = (
-      <OverviewScreen state={state} settings={settings} plan={plan} syncStatus={syncStatus} onOpen={setOpenRecipe}
+      <OverviewScreen state={state} settings={settings} plan={plan} name={profile.name} notice={auth.notice} syncStatus={syncStatus} onOpen={setOpenRecipe}
         onGo={(t) => { setTab(t); setMoreView(null); }} />
     );
   } else if (tab === 'plan') {
@@ -321,14 +351,14 @@ export default function App() {
     body = <PantryScreen pantry={state.pantry} onChange={(pantry) => setState((prev) => ({ ...prev, pantry }))} onBack={() => setMoreView(null)} />;
   } else if (moreView === 'preise') {
     body = <PricesScreen userPrices={state.userPrices} onChange={(userPrices) => setState((prev) => ({ ...prev, userPrices }))} onBack={() => setMoreView(null)} />;
-  } else if (moreView === 'cloud') {
-    body = cloudScreen(() => setMoreView(null));
+  } else if (moreView === 'konto') {
+    body = <AccountScreen profile={profile} syncStatus={syncStatus} onSyncNow={syncNow} onSignOut={signOut} onBack={() => setMoreView(null)} onProfileChanged={auth.refresh} />;
   } else {
     body = <MoreScreen state={state} syncStatus={syncStatus} onOpen={setMoreView} onRestore={(s) => { swapSeen.current = {}; setState(s); }}
       onExpenses={layout.isPhone ? () => setTab('ausgaben') : undefined} />;
   }
 
-  const showNav = !isFirstRun && !openRecipe && !editRecipe && pickDay === null;
+  const showNav = !!settings && !!plan && !openRecipe && !editRecipe && pickDay === null;
   const go = (id: Tab) => { setTab(id); setMoreView(null); setError(null); };
   const tabs = layout.isPhone ? TABS.filter(([id]) => PHONE_TABS.includes(id)) : TABS;
 
@@ -336,7 +366,7 @@ export default function App() {
     <View style={local.root}>
       <StatusBar style="light" />
       <View style={local.frame}>
-        {layout.isDesktop && !isFirstRun ? (
+        {layout.isDesktop && settings && plan ? (
           <View style={local.sidebar}>
             <View style={local.brand}>
               <View style={local.logo}><Icon name="coffee" size={18} color={colors.onAccent} /></View>
@@ -353,10 +383,16 @@ export default function App() {
               );
             })}
             <View style={{ flex: 1 }} />
-            <View style={local.syncBox}>
-              <Icon name="cloud" size={14} color={syncStatus.kind === 'fehler' ? colors.danger : syncStatus.kind === 'ok' ? colors.accent : colors.faint} />
-              <Text style={[styles.hint, { flex: 1 }]} numberOfLines={2}>{syncStatus.text}</Text>
-            </View>
+            <Pressable onPress={() => { setOpenRecipe(null); setEditRecipe(null); setPickDay(null); setTab('mehr'); setMoreView('konto'); }} accessibilityRole="button"
+              style={(st) => [local.syncBox, hov(st) && local.navHover]}>
+              <View style={local.avatar}><Text style={local.avatarText}>{(profile.name || profile.email).slice(0, 1).toUpperCase()}</Text></View>
+              <View style={{ flex: 1 }}>
+                <Text style={local.navText} numberOfLines={1}>{profile.name || profile.email}</Text>
+                <Text style={[styles.hint, { fontSize: 12 }, syncStatus.kind === 'fehler' && { color: colors.danger }]} numberOfLines={1}>
+                  {profile.role === 'owner' ? 'Besitzer · ' : ''}{syncStatus.text}
+                </Text>
+              </View>
+            </Pressable>
           </View>
         ) : null}
         <View style={local.main}><View style={[local.body, layout.isDesktop && { maxWidth: 1240 }]}>{body}</View></View>
@@ -391,6 +427,8 @@ const local = StyleSheet.create({
   navHover: { backgroundColor: colors.card },
   navActive: { backgroundColor: colors.accentSoft },
   navText: { fontSize: 15, color: colors.muted },
+  avatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.accentSoft, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { color: colors.accent, fontWeight: '800' },
   syncBox: { flexDirection: 'row', alignItems: 'center', gap: space.sm, padding: space.md, borderRadius: 12, backgroundColor: colors.card },
   tabBar: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.surface, paddingTop: 6, paddingBottom: Platform.OS === 'web' ? 6 : 22 },
   tab: { flex: 1, alignItems: 'center', gap: 2 },

@@ -34,7 +34,9 @@ function Kpi({ icon, label, value, sub, tone = colors.text }: { icon: IconName; 
   );
 }
 
-export function OverviewScreen({ state, settings, plan, name, syncStatus, onOpen, onGo }: {
+export function OverviewScreen({ state, settings, plan, name, notice, syncStatus, onOpen, onGo }: {
+  /** Einmaliger Hinweis, z. B. nach Übernahme der alten Daten */
+  notice?: string | null;
   state: AppState;
   settings: Settings;
   plan: MealPlan;
@@ -65,12 +67,14 @@ export function OverviewScreen({ state, settings, plan, name, syncStatus, onOpen
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <View style={local.header}>
         <View style={{ flex: 1, minWidth: 220 }}>
-          <Text style={styles.h1}>{greeting()}{name ? `, ${name}` : ''}</Text>
+          <Text style={styles.h1}>{greeting()}{name ? `, ${name.split(' ')[0]}` : ''}</Text>
           <Text style={styles.sub}>KW {isoWeek()} · {settings.householdSize} Personen · {plan.slots.length} Gerichte geplant</Text>
         </View>
         <Tag label={syncStatus.kind === 'ok' ? 'Synchron' : syncStatus.kind === 'fehler' ? 'Sync-Fehler' : syncStatus.kind === 'läuft' ? 'Sync läuft' : 'Nur lokal'}
           tone={syncStatus.kind === 'ok' ? 'accent' : syncStatus.kind === 'fehler' ? 'danger' : 'muted'} icon="cloud" />
       </View>
+
+      {notice ? <Card style={{ borderColor: colors.accent }}><Text style={styles.hint}>{notice}</Text></Card> : null}
 
       <Grid columns={isPhone ? 2 : 4}>
         <Kpi icon="pie-chart" label="Plan diese Woche" value={euro(total)} sub={`von ${euro(settings.weeklyBudget)} Budget`} />

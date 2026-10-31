@@ -38,7 +38,7 @@ function pickBackup(): Promise<AppState | null> {
   });
 }
 
-export type MoreView = 'einstellungen' | 'vorrat' | 'preise' | 'cloud';
+export type MoreView = 'einstellungen' | 'vorrat' | 'preise' | 'konto';
 
 export function MoreScreen({ state, syncStatus, onOpen, onRestore, onExpenses }: {
   state: AppState;
@@ -63,7 +63,7 @@ export function MoreScreen({ state, syncStatus, onOpen, onRestore, onExpenses }:
     ...(onExpenses ? [['ausgaben', 'Ausgaben', 'Bons, Wochenverlauf, Budget', 'credit-card'] as [MoreView | 'ausgaben', string, string, IconName]] : []),
     ['vorrat', 'Vorrat', pantryCount ? `${pantryCount} Sachen zu Hause` : 'Was du schon hast, nicht mehr kaufen', 'archive'],
     ['preise', 'Preise', ownPrices ? `${ownPrices} eigene Preise` : 'Zutatenpreise ansehen und anpassen', 'tag'],
-    ['cloud', 'Cloud-Sync', syncStatus.text, 'cloud'],
+    ['konto', 'Konto und Abgleich', syncStatus.text, 'user'],
     ['einstellungen', 'Einstellungen', 'Haushalt, Budget, Kinder, Kochtage …', 'sliders'],
   ];
 
@@ -77,7 +77,7 @@ export function MoreScreen({ state, syncStatus, onOpen, onRestore, onExpenses }:
             <View style={local.iconBox}><Icon name={icon} size={18} color={colors.accent} /></View>
             <View style={{ flex: 1 }}>
               <Text style={local.title}>{title}</Text>
-              <Text style={[styles.hint, id === 'cloud' && syncStatus.kind === 'fehler' && { color: colors.danger }]} numberOfLines={1}>{sub}</Text>
+              <Text style={[styles.hint, id === 'konto' && syncStatus.kind === 'fehler' && { color: colors.danger }]} numberOfLines={1}>{sub}</Text>
             </View>
             <Icon name="chevron-right" />
           </Pressable>
