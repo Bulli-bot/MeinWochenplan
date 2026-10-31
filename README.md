@@ -19,10 +19,10 @@ Läuft im Browser am PC und auf dem iPhone als Symbol auf dem Home-Bildschirm. I
 - **Rezepte:** Suche, Filter, Preise; „+ Eigenes Rezept" von Hand oder per Link (Link-Import am PC).
 - **Einkauf:** Abhaken, Preis je Artikel, „hab ich" schiebt in den Vorrat. „An Bring! übergeben" kopiert
   die offene Liste – in Bring! ins Eingabefeld einfügen, jede Zeile wird ein Artikel.
-- **Ausgaben:** Bon fotografieren (auch am iPhone) → am PC „Am PC auslesen" → Positionen werden in
+- **Ausgaben:** Bon fotografieren (auch am iPhone) → „Auslesen" (am PC lokal, unterwegs per Gemini) → Positionen werden in
   Wochenplan / Grundbedarf / Nicht im Plan / Verzichtbar / Pfand sortiert (antippen zum Ändern),
   Preise lassen sich mit einem Knopf für die Rezepte übernehmen. Wochenübersicht mit Budget-Ampel.
-- **Mehr:** Vorrat, Preise (eigene Preise überschreiben die Liste), Cloud-Sync, Einstellungen
+- **Mehr:** Vorrat, Preise (eigene Preise überschreiben die Liste), Konto und Abgleich, Einstellungen
   (inkl. Kindernamen), Sicherung als Datei.
 
 ## Konten, Besitzer und Abgleich
