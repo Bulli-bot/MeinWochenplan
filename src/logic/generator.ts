@@ -1,5 +1,5 @@
 import { RECIPES } from '../data/recipes';
-import type { Diet, KidVote, MealPlan, PantryItem, PlanSlot, Protein, Recipe, Settings } from '../types';
+import type { Diet, KidVote, MealPlan, PantryItem, PlanSlot, Protein, Recipe, Settings, Weekday } from '../types';
 
 export interface PlanContext {
   settings: Settings;
@@ -44,16 +44,26 @@ const maxSameCarb = (slots: number, relaxed: boolean) => Math.max(2, Math.ceil(s
 
 export const portionCost = (recipe: Recipe, householdSize: number) => recipe.pricePerPortion * householdSize;
 
-/** Harte Ausschlüsse: Ernährung, Allergene, Küchengeräte, Kochzeit, schlecht bewertet. */
+/** Maximale Kochzeit für einen Tag (Sa/So = Wochenende). */
+export function minutesFor(settings: Settings, day: number): number {
+  const split = day >= 5 ? settings.maxMinutesWeekend : settings.maxMinutesWeekday;
+  return split ?? settings.maxMinutes;
+}
+
+const maxMinutesAny = (settings: Settings) => Math.max(minutesFor(settings, 0), minutesFor(settings, 6));
+
+/** Harte Ausschlüsse: Ernährung, Allergene, Küchengeräte, Kochzeit, Beilagen, schlecht bewertet. */
 export function eligibleRecipes(ctx: PlanContext): Recipe[] {
   const { settings, ratings } = ctx;
   const allowedProteins = DIET_PROTEINS[settings.diet];
+  const sides = settings.sides?.length ? settings.sides : null;
   return RECIPES.filter(
     (r) =>
       allowedProteins.includes(r.protein) &&
       !r.allergens.some((a) => settings.allergens.includes(a)) &&
       r.equipment.every((e) => settings.equipment.includes(e)) &&
-      r.minutes <= settings.maxMinutes &&
+      r.minutes <= maxMinutesAny(settings) &&
+      (!sides || r.carb === 'sonstiges' || sides.includes(r.carb)) &&
       (ratings[r.id] ?? 3) > 1 &&
       // Mögen es alle Kinder nicht, kommt es nicht mehr in den Plan.
       !((settings.kids?.length ?? 0) > 0 && kidTally(r.id, ctx).down === settings.kids!.length),
@@ -109,8 +119,13 @@ interface Attempt {
   cost: number;
 }
 
-function buildAttempt(pool: Recipe[], slots: number, ctx: PlanContext, jitter: number, relaxed: boolean): Attempt | null {
+/**
+ * `limits[i]` = Kochzeit-Grenze für das i-te Gericht, `weights[i]` = an wie vielen Tagen es gegessen
+ * wird (2 beim Vorkochen) – zählt fürs Budget entsprechend mehrfach.
+ */
+function buildAttempt(pool: Recipe[], limits: number[], weights: number[], ctx: PlanContext, jitter: number, relaxed: boolean): Attempt | null {
   const { householdSize, weeklyBudget } = ctx.settings;
+  const slots = limits.length;
   const base = new Map(pool.map((r) => [r.id, baseScore(r, ctx) + Math.random() * jitter]));
   const cheapest = Math.min(...pool.map((r) => portionCost(r, householdSize)));
   const chosen: Recipe[] = [];
@@ -118,13 +133,14 @@ function buildAttempt(pool: Recipe[], slots: number, ctx: PlanContext, jitter: n
   let score = 0;
 
   for (let slot = 0; slot < slots; slot++) {
-    const remainingSlots = slots - slot - 1;
-    const budgetLeft = weeklyBudget - cost - remainingSlots * cheapest;
+    const remainingWeight = weights.slice(slot + 1).reduce((a, b) => a + b, 0);
+    const budgetLeft = weeklyBudget - cost - remainingWeight * cheapest;
     let best: Recipe | null = null;
     let bestScore = -Infinity;
     for (const r of pool) {
+      if (r.minutes > limits[slot]) continue;
       if (!passesVariety(r, chosen, slots, relaxed)) continue;
-      if (portionCost(r, householdSize) > budgetLeft) continue;
+      if (portionCost(r, householdSize) * weights[slot] > budgetLeft) continue;
       const s = (base.get(r.id) ?? 0) + overlapBonus(r, chosen);
       if (s > bestScore) {
         best = r;
@@ -133,7 +149,7 @@ function buildAttempt(pool: Recipe[], slots: number, ctx: PlanContext, jitter: n
     }
     if (!best) return null;
     chosen.push(best);
-    cost += portionCost(best, householdSize);
+    cost += portionCost(best, householdSize) * weights[slot];
     score += bestScore;
   }
   // Leichter Bonus für gute Budgetausnutzung, aber nie über Budget.
@@ -141,15 +157,21 @@ function buildAttempt(pool: Recipe[], slots: number, ctx: PlanContext, jitter: n
   return { recipes: chosen, score, cost };
 }
 
-/** Reihenfolge so legen, dass nicht zweimal hintereinander dasselbe Protein oder dieselbe Beilage kommt. */
-export function orderAvoidingBackToBack(recipes: Recipe[]): Recipe[] {
+/**
+ * Reihenfolge so legen, dass nicht zweimal hintereinander dasselbe Protein oder dieselbe Beilage kommt.
+ * Mit `limits` muss jedes Gericht in die Kochzeit seines Platzes passen; klappt das nicht, bleibt die Reihenfolge.
+ */
+export function orderAvoidingBackToBack(recipes: Recipe[], limits?: number[]): Recipe[] {
   const rest = [...recipes];
   const ordered: Recipe[] = [];
   while (rest.length) {
     const prev = ordered[ordered.length - 1];
-    let index = rest.findIndex((r) => !prev || (r.protein !== prev.protein && r.carb !== prev.carb));
-    if (index === -1) index = rest.findIndex((r) => !prev || r.protein !== prev.protein);
-    if (index === -1) index = 0;
+    const limit = limits?.[ordered.length] ?? Infinity;
+    const fits = (r: Recipe) => r.minutes <= limit;
+    let index = rest.findIndex((r) => fits(r) && (!prev || (r.protein !== prev.protein && r.carb !== prev.carb)));
+    if (index === -1) index = rest.findIndex((r) => fits(r) && (!prev || r.protein !== prev.protein));
+    if (index === -1) index = rest.findIndex(fits);
+    if (index === -1) return recipes;
     ordered.push(rest.splice(index, 1)[0]);
   }
   return ordered;
@@ -157,43 +179,80 @@ export function orderAvoidingBackToBack(recipes: Recipe[]): Recipe[] {
 
 export type GenerateResult = { ok: true; plan: MealPlan; cost: number } | { ok: false; reason: string };
 
-export function generatePlan(ctx: PlanContext): GenerateResult {
-  const days = [...ctx.settings.cookingDays].sort();
-  if (days.length === 0) return { ok: false, reason: 'Bitte mindestens einen Kochtag wählen.' };
-  const pool = eligibleRecipes(ctx);
-  if (pool.length < days.length) {
-    return { ok: false, reason: `Nur ${pool.length} Rezepte passen zu deinen Einstellungen – für ${days.length} Kochtage zu wenig.` };
+export interface CookDay {
+  day: Weekday;
+  /** 2 beim Vorkochen: am nächsten Kochtag gibt es Reste */
+  servesDays: number;
+  resteDay?: Weekday;
+}
+
+/** Welche Tage gekocht wird: Restetag fällt raus; beim Vorkochen wird jeder zweite Tag „Reste vom Vortag“. */
+export function cookingSchedule(settings: Settings): { cook: CookDay[]; restetag: Weekday | null } {
+  const restetag = settings.leftoverDay ?? null;
+  const days = [...settings.cookingDays].sort().filter((d) => d !== restetag) as Weekday[];
+  const cook: CookDay[] = [];
+  for (let i = 0; i < days.length; i++) {
+    if (settings.mealPrep && i + 1 < days.length) {
+      cook.push({ day: days[i], servesDays: 2, resteDay: days[i + 1] });
+      i++;
+    } else cook.push({ day: days[i], servesDays: 1 });
   }
+  return { cook, restetag: restetag !== null && settings.cookingDays.includes(restetag) ? restetag : null };
+}
+
+export function generatePlan(ctx: PlanContext, weekStart?: string): GenerateResult {
+  const { cook, restetag } = cookingSchedule(ctx.settings);
+  if (cook.length === 0) return { ok: false, reason: 'Bitte mindestens einen Kochtag wählen.' };
+  const pool = eligibleRecipes(ctx);
+  if (pool.length < cook.length) {
+    return { ok: false, reason: `Nur ${pool.length} Rezepte passen zu deinen Einstellungen – für ${cook.length} Kochtage zu wenig.` };
+  }
+  const limits = cook.map((c) => minutesFor(ctx.settings, c.day));
+  const weights = cook.map((c) => c.servesDays);
 
   let best: Attempt | null = null;
   // Erst mit strengen Abwechslungsregeln, nur wenn das nichts ergibt, gelockert.
   for (const relaxed of [false, true]) {
     for (let n = 0; n < ATTEMPTS; n++) {
-      const attempt = buildAttempt(pool, days.length, ctx, JITTER, relaxed);
+      const attempt = buildAttempt(pool, limits, weights, ctx, JITTER, relaxed);
       if (attempt && (!best || attempt.score > best.score)) best = attempt;
     }
     if (best) break;
   }
-  if (!best) return { ok: false, reason: 'Mit diesem Budget lässt sich kein abwechslungsreicher Plan bauen. Budget erhöhen oder Filter lockern.' };
+  if (!best) return { ok: false, reason: 'Mit diesem Budget und diesen Kochzeiten lässt sich kein abwechslungsreicher Plan bauen. Budget erhöhen oder Filter lockern.' };
 
-  const ordered = orderAvoidingBackToBack(best.recipes);
-  const slots: PlanSlot[] = days.map((day, idx) => ({ day, recipeId: ordered[idx].id }));
-  return { ok: true, plan: { createdAt: new Date().toISOString(), slots }, cost: best.cost };
+  // Beim Umsortieren müssten die Reste-Tage mitwandern – deshalb nur ohne Vorkochen.
+  const ordered = weights.every((w) => w === 1) ? orderAvoidingBackToBack(best.recipes, limits) : best.recipes;
+  const slots: PlanSlot[] = [];
+  cook.forEach((c, idx) => {
+    slots.push({ day: c.day, recipeId: ordered[idx].id });
+    if (c.resteDay !== undefined) slots.push({ day: c.resteDay, recipeId: ordered[idx].id, kind: 'reste' });
+  });
+  if (restetag !== null) slots.push({ day: restetag, recipeId: '', kind: 'restetag' });
+  slots.sort((a, b) => a.day - b.day);
+  return { ok: true, plan: { createdAt: new Date().toISOString(), weekStart, slots }, cost: best.cost };
 }
 
-/** Zufälliger guter Ersatz für einen Tag, der Budget und Abwechslung einhält. `skip` = zuletzt schon gezeigte Rezepte. */
+/** Zufälliger guter Ersatz für einen Tag, der Budget, Kochzeit und Abwechslung einhält. `skip` = zuletzt schon gezeigte Rezepte. */
 export function findSwap(plan: MealPlan, day: number, ctx: PlanContext, skip: string[] = []): string | null {
   const { householdSize, weeklyBudget } = ctx.settings;
-  const pool = eligibleRecipes(ctx);
-  const byId = new Map(pool.map((r) => [r.id, r]));
-  const others = plan.slots.filter((s) => s.day !== day).map((s) => byId.get(s.recipeId)).filter((r): r is Recipe => !!r);
+  const limit = minutesFor(ctx.settings, day);
+  const pool = eligibleRecipes(ctx).filter((r) => r.minutes <= limit);
+  const byId = new Map(RECIPES.map((r) => [r.id, r]));
   const current = plan.slots.find((s) => s.day === day)?.recipeId;
-  const othersCost = others.reduce((sum, r) => sum + portionCost(r, householdSize), 0);
+  // Der Reste-Tag des getauschten Gerichts wandert mit und zählt nicht als „anderes“ Gericht.
+  const othersSlots = plan.slots.filter((s) => s.day !== day && !(s.kind === 'reste' && s.recipeId === current));
+  const others = othersSlots.filter((s) => s.kind !== 'reste').map((s) => byId.get(s.recipeId)).filter((r): r is Recipe => !!r);
+  const othersCost = othersSlots.reduce((sum, s) => {
+    const r = byId.get(s.recipeId);
+    return sum + (r ? portionCost(r, householdSize) : 0);
+  }, 0);
+  const weight = 1 + plan.slots.filter((s) => s.kind === 'reste' && s.recipeId === current && s.day !== day).length;
 
-  const slots = plan.slots.length;
+  const slots = plan.slots.filter((s) => !s.kind).length;
   const fits = (relaxed: boolean) => pool.filter((r) => r.id !== current && passesVariety(r, others, slots, relaxed));
   const strict = fits(false);
-  const inBudget = (strict.length ? strict : fits(true)).filter((r) => othersCost + portionCost(r, householdSize) <= weeklyBudget);
+  const inBudget = (strict.length ? strict : fits(true)).filter((r) => othersCost + portionCost(r, householdSize) * weight <= weeklyBudget);
   const fresh = inBudget.filter((r) => !skip.includes(r.id));
   const candidates = (fresh.length ? fresh : inBudget)
     .map((r) => ({ r, s: baseScore(r, ctx) + overlapBonus(r, others) + Math.random() * JITTER }))
@@ -203,10 +262,12 @@ export function findSwap(plan: MealPlan, day: number, ctx: PlanContext, skip: st
   return candidates[Math.floor(Math.random() * candidates.length)].r.id;
 }
 
-/** Kosten des Plans, wenn an `day` stattdessen `recipe` gekocht wird. */
+/** Kosten des Plans, wenn an `day` stattdessen `recipe` gekocht wird (inkl. zugehörigem Reste-Tag). */
 export function costWithSwap(plan: MealPlan, day: number, recipe: Recipe, householdSize: number, recipes: Record<string, Recipe>): number {
+  const current = plan.slots.find((s) => s.day === day)?.recipeId;
   return plan.slots.reduce((sum, s) => {
-    const r = s.day === day ? recipe : recipes[s.recipeId];
+    const swapped = s.day === day || (s.kind === 'reste' && s.recipeId === current);
+    const r = swapped ? recipe : recipes[s.recipeId];
     return sum + (r ? portionCost(r, householdSize) : 0);
   }, 0);
 }

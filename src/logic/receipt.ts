@@ -1,5 +1,5 @@
 import { GRAMS_PER_PIECE, priceFor } from '../data/prices';
-import type { Purchase, PurchaseItem, SpendCategory, UserPrice } from '../types';
+import type { BonName, Purchase, PurchaseItem, SpendCategory, UserPrice } from '../types';
 
 /** Bon-Kürzel → Zutat aus den Rezepten. Reihenfolge zählt: Spezielles vor Allgemeinem. */
 const ALIASES: [RegExp, string][] = [
@@ -153,3 +153,20 @@ export function sumBy(purchases: Purchase[]): Record<SpendCategory, number> {
   }
   return out;
 }
+
+/** Schlüssel für gelernte Bon-Kürzel: Kleinbuchstaben, einfache Leerzeichen */
+export const bonKey = (name: string) => name.toLowerCase().replace(/\s+/g, ' ').trim();
+
+/** Bon-Zeile mit gelernten Namen und Kategorien anreichern; unbekannt bleibt, was die App nicht zuordnen kann. */
+export function classifyWithMemory(name: string, planIngredients: Set<string>, bonNames: Record<string, BonName>): Pick<PurchaseItem, 'category' | 'ingredient' | 'label' | 'known'> {
+  const learned = bonNames[bonKey(name)];
+  if (learned) {
+    const ingredient = learned.ingredient ?? matchIngredient(learned.name);
+    const category = ingredient && planIngredients.has(ingredient) ? 'plan' : learned.category === 'plan' && !ingredient ? 'extra' : learned.category;
+    return { label: learned.name, category, ingredient, known: true };
+  }
+  return classify(name, planIngredients);
+}
+
+/** Zeilen, bei denen die App nachfragen sollte, was gemeint ist */
+export const isUnclear = (it: PurchaseItem) => !it.known && !it.label && !it.ingredient && it.category !== 'pfand' && !/^nicht erkannt/i.test(it.name);

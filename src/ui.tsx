@@ -116,6 +116,22 @@ export function Section({ title, hint, children }: { title: string; hint?: strin
   );
 }
 
+/** Ein/Aus-Schalter als ganze Zeile – groß genug zum Tippen auf dem Handy. */
+export function Toggle({ label, hint, value, onChange }: { label: string; hint?: string; value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <Pressable onPress={() => onChange(!value)} accessibilityRole="switch" accessibilityState={{ checked: value }}
+      style={(s) => [styles.toggleRow, hov(s) && { borderColor: colors.borderStrong }]}>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={styles.toggleLabel}>{label}</Text>
+        {hint ? <Text style={styles.hint}>{hint}</Text> : null}
+      </View>
+      <View style={[styles.switch, value && styles.switchOn]}>
+        <View style={[styles.knob, value && styles.knobOn]} />
+      </View>
+    </Pressable>
+  );
+}
+
 export function Button({ label, onPress, variant = 'primary', icon }: {
   label: string; onPress: () => void; variant?: 'primary' | 'secondary' | 'ghost'; icon?: IconName;
 }) {
@@ -166,10 +182,10 @@ export const styles = StyleSheet.create({
   tag: { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 3, alignSelf: 'flex-start' },
   tagText: { fontSize: 12, fontWeight: '600' },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
-  chip: { minHeight: 36, justifyContent: 'center', paddingHorizontal: 14, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+  chip: { minHeight: 36, maxWidth: '100%', justifyContent: 'center', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
   chipHover: { borderColor: colors.borderStrong, backgroundColor: colors.cardHover },
   chipSelected: { backgroundColor: colors.accent, borderColor: colors.accent },
-  chipText: { fontSize: 14, color: colors.text },
+  chipText: { fontSize: 14, color: colors.text, flexShrink: 1 },
   chipTextSelected: { color: colors.onAccent, fontWeight: '700' },
   button: { minHeight: 44, flexDirection: 'row', gap: space.sm, backgroundColor: colors.accent, borderRadius: radius.md, paddingHorizontal: space.lg, alignItems: 'center', justifyContent: 'center' },
   buttonHover: { backgroundColor: '#72CC96' },
@@ -188,6 +204,12 @@ export const styles = StyleSheet.create({
     paddingHorizontal: 14, paddingVertical: 10, fontSize: 16,
   },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.sm, flexWrap: 'wrap' },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, minHeight: 52, paddingHorizontal: space.md, paddingVertical: space.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, width: '100%', maxWidth: 560 },
+  toggleLabel: { fontSize: 15, color: colors.text, fontWeight: '600' },
+  switch: { width: 46, height: 28, borderRadius: 14, backgroundColor: colors.input, borderWidth: 1, borderColor: colors.borderStrong, padding: 2, justifyContent: 'center' },
+  switchOn: { backgroundColor: colors.accent, borderColor: colors.accent },
+  knob: { width: 22, height: 22, borderRadius: 11, backgroundColor: colors.muted },
+  knobOn: { backgroundColor: colors.onAccent, alignSelf: 'flex-end' },
   small: { minHeight: 36, justifyContent: 'center', paddingHorizontal: 14, borderRadius: radius.sm, backgroundColor: colors.accentSoft },
   smallText: { color: colors.accent, fontWeight: '600', fontSize: 14 },
 });

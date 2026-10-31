@@ -47,16 +47,47 @@ export interface Settings {
   maxMinutes: number;
   /** Namen der Kinder für die Daumen-Bewertung */
   kids?: string[];
+  /** Kochzeit getrennt nach Mo–Fr und Sa/So (ersetzen maxMinutes, wenn gesetzt) */
+  maxMinutesWeekday?: number;
+  maxMinutesWeekend?: number;
+  /** Jedes zweite Essen ist „Reste vom Vortag“ – es wird für zwei Tage gekocht */
+  mealPrep?: boolean;
+  /** An diesem Tag wird nichts gekocht, sondern Reste gegessen */
+  leftoverDay?: Weekday | null;
+  /** Welche Sättigungsbeilagen auf den Tisch kommen; leer/fehlend = alle */
+  sides?: Carb[];
+  /** Wo eingekauft wird – passt die geschätzten Preise an */
+  store?: StoreLevel;
+  /** Eigenmarken / No-Name bevorzugt (Preise in der App sind Eigenmarken-Preise) */
+  privateLabel?: boolean;
+  /** Grundzutaten, die immer da sind und nicht auf die Einkaufsliste kommen */
+  basics?: Basic[];
+  shopRhythm?: 'einmal' | 'zweimal';
+  /** Neue Pläne ab Freitag gelten für die kommende Woche (Standard) oder immer für die laufende */
+  planWeek?: 'kommend' | 'laufend';
 }
+
+export type StoreLevel = 'discounter' | 'supermarkt' | 'mix';
+export type Basic = 'oel_essig' | 'salz_pfeffer' | 'mehl_zucker' | 'zwiebel_knoblauch' | 'gewuerze';
 
 export interface PlanSlot {
   day: Weekday;
+  /** Leer bei „restetag“ */
   recipeId: string;
+  /** „reste“ = Reste vom Vortag (doppelt gekocht), „restetag“ = fester Restetag ohne Kochen */
+  kind?: 'reste' | 'restetag';
 }
 
 export interface MealPlan {
   createdAt: string;
+  /** Montag der Woche, für die der Plan gilt (JJJJ-MM-TT). Fehlt bei alten Plänen. */
+  weekStart?: string;
   slots: PlanSlot[];
+  /** Nur bei gespeicherten Wochen: was gekocht wurde */
+  cooked?: string[];
+  /** Selbst gespeichert (bleibt, wird nicht automatisch aufgeräumt) und ggf. benannt */
+  saved?: boolean;
+  name?: string;
 }
 
 export interface AppState {
@@ -77,6 +108,28 @@ export interface AppState {
   customRecipes: CustomRecipe[];
   /** Rezept-ID → Kind → Daumen hoch (1) oder runter (-1) */
   kidVotes: Record<string, Record<string, KidVote>>;
+  /** Frühere und gespeicherte Wochen, neueste zuerst */
+  archive: MealPlan[];
+  /** Selbst gelernte Bon-Kürzel: „TOPA 3LG. 20X200“ → Toilettenpapier */
+  bonNames: Record<string, BonName>;
+  /** Selbst hinzugefügte Einkaufsartikel (nicht aus dem Plan) */
+  shopExtras: ShopExtra[];
+}
+
+export interface ShopExtra {
+  id: string;
+  name: string;
+  /** frei, z. B. „2 Packungen“ */
+  amount?: string;
+  done?: boolean;
+  /** Woher: selbst eingetragen oder aus der Vorrats-Erinnerung */
+  from?: 'eigen' | 'vorrat';
+}
+
+export interface BonName {
+  name: string;
+  category: SpendCategory;
+  ingredient?: string;
 }
 
 export interface PhotoRef {
@@ -84,17 +137,32 @@ export interface PhotoRef {
   date: string;
 }
 
+export type PantryKind = 'lebensmittel' | 'getraenke' | 'drogerie' | 'haushalt';
+
 /** Was zu Hause schon da ist. Ohne Menge = „genug da". */
 export interface PantryItem {
   name: string;
   amount?: number;
-  unit?: Unit;
+  /** Rezept-Einheit (g, ml, Stück …) oder frei, z. B. „Flaschen“, „Rollen“ */
+  unit?: Unit | string;
+  kind?: PantryKind;
+  /** Verbrauch pro Tag in derselben Einheit – dann rechnet die App mit, wann es leer ist */
+  perDay?: number;
+  /** Wann die Menge zuletzt eingetragen wurde (ISO) */
+  since?: string;
+  /** So viele Tage vor „leer“ erinnern (Standard 1) */
+  remindDays?: number;
 }
 
 export type SpendCategory = 'plan' | 'grund' | 'extra' | 'verzichtbar' | 'pfand';
 
 export interface PurchaseItem {
+  /** Text wie auf dem Bon */
   name: string;
+  /** Verständlicher Name, z. B. „Toilettenpapier“ für „TOPA 3LG. 20X200“ */
+  label?: string;
+  /** Vom Nutzer geprüft – wird nicht mehr als „unklar“ nachgefragt */
+  known?: boolean;
   price: number;
   category: SpendCategory;
   /** Zugeordnete Zutat aus den Rezepten, falls erkannt */

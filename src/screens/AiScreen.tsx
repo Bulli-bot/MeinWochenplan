@@ -86,7 +86,7 @@ export function AiScreen({ state, settings, onRecipeDraft }: {
   const quick: [string, string, boolean][] = [
     ['Was koche ich aus meinem Vorrat?', 'Was kann ich heute aus meinem Vorrat kochen? Gib mir 3 Ideen.', false],
     ['Neues Rezept vorschlagen', 'Schlag mir ein neues, günstiges Rezept vor, das Kinder mögen und das nicht im Wochenplan steht.', true],
-    ...(todayName ? [[`„${todayName}“ kinderfreundlicher`, `Wie mache ich „${todayName}“ noch kinderfreundlicher und schneller?`, false] as [string, string, boolean]] : []),
+    ...(todayName ? [[`Heutiges Essen kinderfreundlicher`, `Wie mache ich „${todayName}“ noch kinderfreundlicher und schneller?`, false] as [string, string, boolean]] : []),
     ['Resteverwertung', 'Was mache ich aus Resten von dieser Woche, damit nichts weggeworfen wird?', false],
     ['Günstiger einkaufen', 'Wo kann ich bei meinem Wochenplan am meisten sparen?', false],
   ];

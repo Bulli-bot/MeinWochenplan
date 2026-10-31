@@ -17,8 +17,8 @@ Läuft im Browser am PC und auf dem iPhone als Symbol auf dem Home-Bildschirm. I
   „Zufällig tauschen". Gerichte mit Vorratszutaten und 👍 der Kinder werden bevorzugt; mögen es alle
   Kinder nicht (👎), fliegt es aus dem Plan.
 - **Rezepte:** Suche, Filter, Preise; „+ Eigenes Rezept" von Hand oder per Link (Link-Import am PC).
-- **Einkauf:** Abhaken, Preis je Artikel, „hab ich" schiebt in den Vorrat. „An Bring! übergeben" kopiert
-  die offene Liste – in Bring! ins Eingabefeld einfügen, jede Zeile wird ein Artikel.
+- **Einkauf:** Abhaken, Preis je Artikel, „hab ich" schiebt in den Vorrat, eigene Artikel dazuschreiben.
+  Grundzutaten (Einstellungen) fehlen auf der Liste; bei „2x einkaufen" kommt Frisches ab Donnerstag in einen zweiten Einkauf.
 - **Ausgaben:** Bon fotografieren (auch am iPhone) → „Auslesen" (am PC lokal, unterwegs per Gemini) → Positionen werden in
   Wochenplan / Grundbedarf / Nicht im Plan / Verzichtbar / Pfand sortiert (antippen zum Ändern),
   Preise lassen sich mit einem Knopf für die Rezepte übernehmen. Wochenübersicht mit Budget-Ampel.

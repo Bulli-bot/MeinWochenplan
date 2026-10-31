@@ -14,6 +14,16 @@ export const DEFAULT_SETTINGS: Settings = {
   proteinLikes: [],
   maxMinutes: 45,
   kids: [],
+  maxMinutesWeekday: 30,
+  maxMinutesWeekend: 90,
+  mealPrep: false,
+  leftoverDay: null,
+  sides: ['kartoffeln', 'nudeln', 'reis', 'brot'],
+  store: 'discounter',
+  privateLabel: true,
+  basics: ['oel_essig', 'salz_pfeffer'],
+  shopRhythm: 'einmal',
+  planWeek: 'kommend',
 };
 
 export const EMPTY_STATE: AppState = {
@@ -30,6 +40,9 @@ export const EMPTY_STATE: AppState = {
   userPrices: {},
   customRecipes: [],
   kidVotes: {},
+  archive: [],
+  bonNames: {},
+  shopExtras: [],
 };
 
 export async function loadState(): Promise<AppState> {

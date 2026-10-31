@@ -1,5 +1,5 @@
 import { RECIPE_BY_ID } from '../data/recipes';
-import type { Category, MealPlan, Unit } from '../types';
+import type { Basic, Category, MealPlan, Unit } from '../types';
 
 export interface ShoppingItem {
   key: string;
@@ -8,6 +8,8 @@ export interface ShoppingItem {
   unit: Unit;
   category: Category;
   recipes: string[];
+  /** Wochentage (0 = Mo), an denen die Zutat gebraucht wird */
+  days: number[];
 }
 
 export const CATEGORY_ORDER: Category[] = [
@@ -39,8 +41,9 @@ export function buildShoppingList(plan: MealPlan, householdSize: number): Shoppi
       if (existing) {
         existing.amount += amount;
         if (!existing.recipes.includes(recipe.name)) existing.recipes.push(recipe.name);
+        if (!existing.days.includes(slot.day)) existing.days.push(slot.day);
       } else {
-        items.set(key, { key, name: ing.name, amount, unit: ing.unit, category: ing.category, recipes: [recipe.name] });
+        items.set(key, { key, name: ing.name, amount, unit: ing.unit, category: ing.category, recipes: [recipe.name], days: [slot.day] });
       }
     }
   }
@@ -67,12 +70,24 @@ export function shoppingListAsText(items: ShoppingItem[]): string {
   return lines.join('\n').trim();
 }
 
-/**
- * Format für Bring!: ein Artikel pro Zeile, Name zuerst (damit Bring! sein Artikel-Icon findet),
- * keine Überschriften, keine Kommas – Bring! trennt beim Einfügen an Zeilenumbrüchen und Kommas.
- */
-export function shoppingListForBring(items: ShoppingItem[]): string {
-  return CATEGORY_ORDER.flatMap((cat) => items.filter((i) => i.category === cat))
-    .map((it) => `${it.name.replace(/,/g, ' ')} ${it.amount} ${it.unit}`)
-    .join('\n');
+/** Grundzutaten, die man meist im Haus hat (Einstellungen → „Grundzutaten vorhanden“). */
+export const BASICS: [Basic, string, RegExp][] = [
+  ['oel_essig', 'Öl & Essig', /öl$|^öl|essig|balsamico/i],
+  ['salz_pfeffer', 'Salz & Pfeffer', /^salz|^pfeffer/i],
+  ['mehl_zucker', 'Mehl & Zucker', /^mehl|zucker|speisestärke|backpulver/i],
+  ['zwiebel_knoblauch', 'Zwiebeln & Knoblauch', /^(rote )?zwiebel|knoblauch/i],
+  ['gewuerze', 'Gewürz-Standards', /pulver|gewürz(?!gurke)|kreuzkümmel|zimt|rosmarin|oregano|thymian|majoran|muskat|brühe/i],
+];
+
+export function isBasic(name: string, basics: Basic[] | undefined): boolean {
+  return !!basics?.length && BASICS.some(([id, , re]) => basics.includes(id) && re.test(name));
 }
+
+const FRESH: Category[] = ['Obst & Gemüse', 'Fleisch & Fisch', 'Kühlregal', 'Brot & Backwaren'];
+
+/**
+ * Bei zwei Einkäufen pro Woche: Frisches, das erst ab Donnerstag gebraucht wird, kommt in den
+ * zweiten Einkauf (Mittwoch/Donnerstag) – alles andere in den Wocheneinkauf.
+ */
+export const shoppingTrip = (it: ShoppingItem, rhythm: 'einmal' | 'zweimal' | undefined): 1 | 2 =>
+  rhythm === 'zweimal' && FRESH.includes(it.category) && Math.min(...it.days) >= 3 ? 2 : 1;

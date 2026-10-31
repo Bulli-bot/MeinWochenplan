@@ -1,4 +1,4 @@
-import type { Ingredient, UserPrice } from '../types';
+import type { Ingredient, UserPrice, StoreLevel } from '../types';
 
 /**
  * Zutatenpreise. Quelle „bon" = tatsächlich bezahlt laut eigenem Kassenbon
@@ -189,10 +189,23 @@ export function setUserPrices(prices: Record<string, UserPrice>) {
   USER_PRICES = prices;
 }
 
-/** Gültiger Preis einer Zutat: eigener Preis vor Liste. */
+/** Aufschlag auf die Listenpreise je nach Einkaufsmarkt (die Liste sind Discounter-Eigenmarken). */
+let PRICE_LEVEL = 1;
+export function setPriceLevel(factor: number) {
+  PRICE_LEVEL = factor;
+}
+
+export function priceLevelFor(store: StoreLevel | undefined, privateLabel: boolean | undefined): number {
+  const base = store === 'supermarkt' ? 1.2 : store === 'mix' ? 0.95 : 1;
+  return Math.round(base * (privateLabel === false ? 1.25 : 1) * 100) / 100;
+}
+
+/** Gültiger Preis einer Zutat: eigener Preis vor Liste (Liste mit Markt-Aufschlag). */
 export function priceFor(name: string): IngredientPrice | undefined {
   const own = USER_PRICES[name];
-  return own ? { price: own.price, per: own.per, source: 'eigen', product: own.product } : PRICES[name];
+  if (own) return { price: own.price, per: own.per, source: 'eigen', product: own.product };
+  const listed = PRICES[name];
+  return listed && PRICE_LEVEL !== 1 ? { ...listed, price: listed.price * PRICE_LEVEL } : listed;
 }
 
 /** Ungefähres Gewicht eines Stücks – um Packungspreise (€/kg) in Stückpreise umzurechnen. */

@@ -4,13 +4,15 @@ import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from '
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from './src/auth';
 import { deleteCloudPhoto, uploadPhoto, useCloudSync } from './src/cloud';
+import { priceLevelFor } from './src/data/prices';
 import { BUILTIN_IDS, RECIPE_BY_ID, rebuildCatalog } from './src/data/recipes';
+import { budgetWeekKey, isoWeek, parseDay, planWeekKey, targetWeekStart, todayInPlan, weekRelation } from './src/logic/dates';
 import { findSwap, generatePlan, kidTally, planCost, type PlanContext } from './src/logic/generator';
 import { deletePhotoData, newPhotoId, pickPhoto, savePhotoData } from './src/photos';
 import { AccountScreen } from './src/screens/AccountScreen';
 import { AiScreen } from './src/screens/AiScreen';
 import { AuthScreen, NewPasswordScreen, PendingScreen } from './src/screens/AuthScreen';
-import { ExpensesScreen } from './src/screens/ExpensesScreen';
+import { CategoryBar, ExpensesScreen } from './src/screens/ExpensesScreen';
 import { MoreScreen, type MoreView } from './src/screens/MoreScreen';
 import { OverviewScreen } from './src/screens/OverviewScreen';
 import { PantryScreen } from './src/screens/PantryScreen';
@@ -22,8 +24,8 @@ import { DEFAULT_FILTERS, RecipesScreen, type RecipeFilters } from './src/screen
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { ShoppingListScreen } from './src/screens/ShoppingListScreen';
 import { DEFAULT_SETTINGS, EMPTY_STATE, loadState, saveState } from './src/storage';
-import type { AppState, CustomRecipe, Settings } from './src/types';
-import { Button, Icon, colors, hov, space, styles, useLayout, type IconName } from './src/ui';
+import type { AppState, CustomRecipe, MealPlan, Settings } from './src/types';
+import { Button, Icon, colors, euro, hov, space, styles, useLayout, type IconName } from './src/ui';
 
 type Tab = 'start' | 'plan' | 'rezepte' | 'einkauf' | 'ausgaben' | 'ki' | 'mehr';
 const TABS: [Tab, string, IconName][] = [
@@ -33,7 +35,18 @@ const TABS: [Tab, string, IconName][] = [
 /** Auf dem Handy ist unten nur Platz für fünf – Ausgaben und KI gibt es dort über die Übersicht und „Mehr“. */
 const PHONE_TABS: Tab[] = ['start', 'plan', 'rezepte', 'einkauf', 'mehr'];
 const RECENT_LIMIT = 21;
+/** So viele automatisch aufgehobene Wochen bleiben; selbst gespeicherte bleiben immer. */
+const ARCHIVE_LIMIT = 26;
 const LOCAL_OWNER_KEY = 'meinwochenplan:local-owner';
+
+/** Woche ins Archiv legen (mit „gekocht“), neueste zuerst, alte ungespeicherte aufräumen. */
+function archiveAdd(archive: MealPlan[], plan: MealPlan, cooked: string[]): MealPlan[] {
+  const entry: MealPlan = { ...plan, weekStart: planWeekKey(plan), cooked };
+  const rest = archive.filter((p) => p.createdAt !== plan.createdAt);
+  const sorted = [entry, ...rest].sort((a, b) => planWeekKey(b).localeCompare(planWeekKey(a)));
+  let unsaved = 0;
+  return sorted.filter((p) => p.saved || ++unsaved <= ARCHIVE_LIMIT);
+}
 
 export default function App() {
   const [state, setState] = useState<AppState>(EMPTY_STATE);
@@ -45,6 +58,8 @@ export default function App() {
   const [moreView, setMoreView] = useState<MoreView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pickDay, setPickDay] = useState<number | null>(null);
+  /** Angezeigte Woche (JJJJ-MM-TT des Montags); null = aktueller Plan */
+  const [viewWeek, setViewWeek] = useState<string | null>(null);
   const [filters, setFilters] = useState<RecipeFilters>(DEFAULT_FILTERS);
   const [pickFilters, setPickFilters] = useState<RecipeFilters>({ ...DEFAULT_FILTERS, onlyMatching: true });
   /** Konto, für das der Abgleich läuft – erst gesetzt, wenn die lokalen Daten zu diesem Konto passen */
@@ -105,7 +120,7 @@ export default function App() {
   };
 
   // Eigene Rezepte und Preise in den Katalog rechnen, bevor irgendetwas gerendert wird.
-  rebuildCatalog(state.customRecipes, state.userPrices);
+  rebuildCatalog(state.customRecipes, state.userPrices, priceLevelFor(state.settings?.store, state.settings?.privateLabel));
 
   const context = (settings: Settings): PlanContext => ({
     settings,
@@ -116,34 +131,73 @@ export default function App() {
     pantry: state.pantry,
   });
 
-  const createPlan = (settings: Settings) => {
-    const result = generatePlan(context(settings));
+  /**
+   * Neuen Plan aktiv machen. Gilt er für eine andere Woche als der bisherige, wandert der bisherige
+   * ins Archiv (mit dem, was gekocht wurde); für dieselbe Woche wird er ersetzt (außer er ist gespeichert).
+   */
+  const installPlan = (next: MealPlan, settings?: Settings) => {
+    const week = planWeekKey(next);
+    swapSeen.current = {};
+    setViewWeek(null);
+    setState((prev) => {
+      const old = prev.plan;
+      const keepOld = old && (planWeekKey(old) !== week || old.saved);
+      const archive = (keepOld ? archiveAdd(prev.archive, old, prev.cooked) : prev.archive)
+        .filter((p) => p.saved || planWeekKey(p) !== week);
+      return {
+        ...prev,
+        settings: settings ?? prev.settings,
+        plan: next,
+        archive,
+        // Der bisherige Plan wird zur "letzten Woche", damit sich Gerichte nicht sofort wiederholen.
+        recentRecipeIds: [...(old?.slots.map((s) => s.recipeId).filter(Boolean) ?? []), ...prev.recentRecipeIds].slice(0, RECENT_LIMIT),
+        checkedItems: [],
+        cooked: [],
+        shopExtras: prev.shopExtras.filter((x) => !x.done),
+      };
+    });
+  };
+
+  /** `week` = Montag der Zielwoche; ohne Angabe nach Einstellung (ab Freitag die kommende Woche). */
+  const createPlan = (settings: Settings, week?: string) => {
+    const result = generatePlan(context(settings), week ?? targetWeekStart(settings));
     if (!result.ok) {
       setError(result.reason);
       return false;
     }
     setError(null);
-    swapSeen.current = {};
-    setState((prev) => ({
-      ...prev,
-      settings,
-      plan: result.plan,
-      // Der bisherige Plan wird zur "letzten Woche", damit sich Gerichte nicht sofort wiederholen.
-      recentRecipeIds: [...(prev.plan?.slots.map((s) => s.recipeId) ?? []), ...prev.recentRecipeIds].slice(0, RECENT_LIMIT),
-      checkedItems: [],
-      cooked: [],
-    }));
+    installPlan(result.plan, settings);
     return true;
   };
 
   const setDayRecipe = (day: number, recipeId: string) => {
-    const previous = state.plan?.slots.find((s) => s.day === day)?.recipeId;
+    const current = state.plan?.slots.find((s) => s.day === day);
+    const previous = current?.recipeId;
     if (previous) swapSeen.current[day] = [...(swapSeen.current[day] ?? []), previous];
     setState((prev) => prev.plan ? {
       ...prev,
-      plan: { ...prev.plan, slots: prev.plan.slots.map((s) => (s.day === day ? { ...s, recipeId } : s)) },
+      plan: {
+        ...prev.plan,
+        slots: prev.plan.slots.map((s) => {
+          if (s.day === day) return { day: s.day, recipeId };
+          // Beim Vorkochen wandert der Reste-Tag mit dem gekochten Gericht mit
+          if (!current?.kind && s.kind === 'reste' && s.recipeId === previous && s.day > day) return { ...s, recipeId };
+          return s;
+        }),
+      },
     } : prev);
   };
+
+  /** Woche merken bzw. vergessen – aktueller Plan oder Eintrag im Archiv */
+  const markSaved = (target: MealPlan, saved: boolean, name?: string) => setState((prev) => {
+    const patch = (p: MealPlan): MealPlan => (p.createdAt === target.createdAt ? { ...p, saved, name: saved ? (name?.trim() || undefined) : p.name } : p);
+    return { ...prev, plan: prev.plan ? patch(prev.plan) : prev.plan, archive: prev.archive.map(patch) };
+  });
+
+  const addExtra = (name: string, from: 'eigen' | 'vorrat' = 'eigen') => setState((prev) => (
+    prev.shopExtras.some((x) => !x.done && x.name.toLowerCase() === name.toLowerCase()) ? prev
+      : { ...prev, shopExtras: [...prev.shopExtras, { id: `x${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, name, from }] }
+  ));
 
   const swapDay = (day: number) => {
     if (!state.plan || !state.settings) return false;
@@ -220,6 +274,29 @@ export default function App() {
   // Erster Start: kurz warten, ob die Cloud schon eine Woche hat, statt sofort das Formular zu zeigen.
   const isFirstRun = (!settings || !plan) && syncStatus.kind !== 'läuft';
 
+  // Wochen: aktueller Plan plus Archiv (gleiche Woche zählt nur einmal, der aktuelle gewinnt)
+  const allPlans: MealPlan[] = plan ? [plan, ...state.archive.filter((p) => planWeekKey(p) !== planWeekKey(plan))] : [];
+  const weeksAsc = [...allPlans].sort((a, b) => planWeekKey(a).localeCompare(planWeekKey(b)));
+  const shown = (viewWeek ? allPlans.find((p) => planWeekKey(p) === viewWeek) : undefined) ?? plan;
+  const shownIdx = shown ? weeksAsc.indexOf(shown) : -1;
+  const nav = shown ? {
+    plan: shown,
+    relation: weekRelation(shown),
+    onPrev: shownIdx > 0 ? () => setViewWeek(planWeekKey(weeksAsc[shownIdx - 1])) : undefined,
+    onNext: shownIdx >= 0 && shownIdx < weeksAsc.length - 1 ? () => setViewWeek(planWeekKey(weeksAsc[shownIdx + 1])) : undefined,
+  } : null;
+  const isActiveShown = !!plan && shown === plan;
+  const todayPlan = allPlans.find((p) => todayInPlan(p) !== null) ?? null;
+  const target = settings ? targetWeekStart(settings) : null;
+  // Ab Freitag: Hinweis „kommende Woche planen“, solange der aktuelle Plan noch für diese Woche ist
+  const planNext = settings && plan && target && target > planWeekKey(plan)
+    ? { label: `Kommende Woche (KW ${isoWeek(parseDay(target))})`, run: () => { createPlan(settings, target); } }
+    : undefined;
+  const weekOf = (iso: string) => budgetWeekKey(iso, settings);
+  const nowWeek = budgetWeekKey(new Date().toISOString(), settings);
+  const purchasesFor = (week: string) => state.purchases.filter((p) => p.status === 'fertig' && weekOf(p.date) === week);
+  const goMore = (v: MoreView) => { setOpenRecipe(null); setEditRecipe(null); setPickDay(null); setTab('mehr'); setMoreView(v); };
+
   let body;
   if (!settings || !plan) {
     body = isFirstRun ? (
@@ -292,24 +369,34 @@ export default function App() {
     );
   } else if (tab === 'start') {
     body = (
-      <OverviewScreen state={state} settings={settings} plan={plan} name={profile.name} notice={auth.notice} syncStatus={syncStatus} onOpen={setOpenRecipe}
-        onGo={(t) => { setTab(t); setMoreView(null); }} />
+      <OverviewScreen state={state} settings={settings} plan={shown!} isActive={isActiveShown} nav={nav!} todayPlan={todayPlan}
+        weekPurchases={purchasesFor(planWeekKey(shown!))} showExpenses={!layout.isDesktop} name={profile.name} notice={auth.notice} syncStatus={syncStatus}
+        onOpen={setOpenRecipe} onPlanNext={planNext} onToShopping={(n) => addExtra(n, 'vorrat')}
+        onGo={(t) => { if (t === 'vorrat') goMore('vorrat'); else { setTab(t); setMoreView(null); } }} />
     );
   } else if (tab === 'plan') {
     body = (
       <PlanScreen
-        plan={plan}
+        plan={shown!}
+        isActive={isActiveShown}
+        nav={nav!}
+        allPlans={allPlans}
+        savedPlans={allPlans.filter((p) => p.saved && p !== shown)}
         householdSize={settings.householdSize}
         budget={settings.weeklyBudget}
         favourites={state.favourites}
-        cooked={state.cooked}
+        cooked={isActiveShown ? state.cooked : shown!.cooked ?? []}
         photos={state.photos}
         kidInfo={(rid) => kidTally(rid, { kidVotes: state.kidVotes, settings })}
         error={error}
         onOpen={setOpenRecipe}
         onSwap={swapDay}
         onChoose={(day) => { setError(null); setPickDay(day); }}
-        onRegenerate={() => createPlan(settings)}
+        onRegenerate={() => createPlan(settings, planWeekKey(plan))}
+        onPlanNext={planNext}
+        onSaveWeek={(name) => markSaved(shown!, true, name)}
+        onUnsave={(p) => markSaved(p, false)}
+        onReuse={(p) => installPlan({ createdAt: new Date().toISOString(), weekStart: targetWeekStart(settings), slots: p.slots.map((x) => ({ ...x })) })}
         footer={<Text style={[styles.hint, syncStatus.kind === 'fehler' && { color: colors.danger }]}>☁ {syncStatus.text}</Text>}
       />
     );
@@ -321,9 +408,13 @@ export default function App() {
     body = (
       <ShoppingListScreen
         plan={plan}
-        householdSize={settings.householdSize}
+        settings={settings}
         checked={state.checkedItems}
         pantry={state.pantry}
+        extras={state.shopExtras}
+        onAddExtra={(n) => addExtra(n)}
+        onToggleExtra={(id) => setState((prev) => ({ ...prev, shopExtras: prev.shopExtras.map((x) => (x.id === id ? { ...x, done: !x.done } : x)) }))}
+        onRemoveExtra={(id) => setState((prev) => ({ ...prev, shopExtras: prev.shopExtras.filter((x) => x.id !== id) }))}
         onToggle={(key) => toggleIn('checkedItems', key)}
         onReset={() => setState((prev) => ({ ...prev, checkedItems: [] }))}
         onHave={(name) => setState((prev) => ({ ...prev, pantry: [...prev.pantry.filter((p) => p.name !== name), { name }] }))}
@@ -337,6 +428,10 @@ export default function App() {
         budget={settings.weeklyBudget}
         plannedCost={planCost(plan, settings.householdSize, RECIPE_BY_ID)}
         planIngredients={new Set(plan.slots.flatMap((s) => RECIPE_BY_ID[s.recipeId]?.ingredients.map((i) => i.name) ?? []))}
+        bonNames={state.bonNames}
+        currentWeek={nowWeek}
+        weekOf={weekOf}
+        onLearnName={(key, value) => setState((prev) => ({ ...prev, bonNames: { ...prev.bonNames, [key]: value } }))}
         onSave={(p) => setState((prev) => ({ ...prev, purchases: [...prev.purchases.filter((x) => x.id !== p.id), p] }))}
         onDelete={(id) => setState((prev) => {
           const gone = prev.purchases.find((p) => p.id === id);
@@ -356,10 +451,12 @@ export default function App() {
         error={error}
         header={<Pressable onPress={() => setMoreView(null)}><Text style={local.back}>‹ Mehr</Text></Pressable>}
         onSave={(s) => { if (createPlan(s)) { setMoreView(null); setTab('plan'); } }}
+        onSaveOnly={(s) => { setState((prev) => ({ ...prev, settings: s })); setMoreView(null); }}
       />
     );
   } else if (moreView === 'vorrat') {
-    body = <PantryScreen pantry={state.pantry} onChange={(pantry) => setState((prev) => ({ ...prev, pantry }))} onBack={() => setMoreView(null)} />;
+    body = <PantryScreen pantry={state.pantry} onChange={(pantry) => setState((prev) => ({ ...prev, pantry }))} onBack={() => setMoreView(null)}
+      onToShopping={(n) => addExtra(n, 'vorrat')} />;
   } else if (moreView === 'preise') {
     body = <PricesScreen userPrices={state.userPrices} onChange={(userPrices) => setState((prev) => ({ ...prev, userPrices }))} onBack={() => setMoreView(null)} />;
   } else if (moreView === 'konto') {
@@ -394,7 +491,25 @@ export default function App() {
               );
             })}
             <View style={{ flex: 1 }} />
-            <Pressable onPress={() => { setOpenRecipe(null); setEditRecipe(null); setPickDay(null); setTab('mehr'); setMoreView('konto'); }} accessibilityRole="button"
+            {(() => {
+              // Ausgaben der Einkaufswoche – am Desktop dauerhaft sichtbar über dem Konto
+              const list = purchasesFor(nowWeek);
+              const sum = list.reduce((a, p) => a + p.total, 0);
+              return (
+                <Pressable onPress={() => { setOpenRecipe(null); setEditRecipe(null); setPickDay(null); go('ausgaben'); }} accessibilityRole="button"
+                  style={(st) => [local.spendBox, hov(st) && local.navHover]}>
+                  <View style={local.spendHead}>
+                    <Text style={[styles.hint, { fontWeight: '700', color: colors.text }]}>Ausgaben KW {isoWeek(parseDay(nowWeek))}</Text>
+                    <Icon name="chevron-right" size={16} />
+                  </View>
+                  <Text style={[local.spendSum, { color: sum > settings.weeklyBudget ? colors.danger : sum > settings.weeklyBudget * 0.85 ? colors.warn : colors.text }]}>
+                    {euro(sum)}<Text style={[styles.hint, { fontSize: 12 }]}> / {euro(settings.weeklyBudget)}</Text>
+                  </Text>
+                  {list.length ? <CategoryBar purchases={list} compact /> : <Text style={[styles.hint, { fontSize: 12 }]}>Noch kein Bon</Text>}
+                </Pressable>
+              );
+            })()}
+            <Pressable onPress={() => goMore('konto')} accessibilityRole="button"
               style={(st) => [local.syncBox, hov(st) && local.navHover]}>
               <View style={local.avatar}><Text style={local.avatarText}>{(profile.name || profile.email).slice(0, 1).toUpperCase()}</Text></View>
               <View style={{ flex: 1 }}>
@@ -440,6 +555,9 @@ const local = StyleSheet.create({
   navText: { fontSize: 15, color: colors.muted },
   avatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.accentSoft, alignItems: 'center', justifyContent: 'center' },
   avatarText: { color: colors.accent, fontWeight: '800' },
+  spendBox: { padding: space.md, borderRadius: 12, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, gap: 4, marginBottom: space.sm },
+  spendHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  spendSum: { fontSize: 18, fontWeight: '800', color: colors.text },
   syncBox: { flexDirection: 'row', alignItems: 'center', gap: space.sm, padding: space.md, borderRadius: 12, backgroundColor: colors.card },
   tabBar: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.surface, paddingTop: 6, paddingBottom: Platform.OS === 'web' ? 6 : 22 },
   tab: { flex: 1, alignItems: 'center', gap: 2 },

@@ -1,5 +1,5 @@
 import type { Category, CustomRecipe, Ingredient, Recipe, Unit, UserPrice } from '../types';
-import { BASICS_PER_PORTION, ingredientCost, priceFor, setUserPrices } from './prices';
+import { BASICS_PER_PORTION, ingredientCost, priceFor, setPriceLevel, setUserPrices } from './prices';
 
 // Eigene Beispielrezepte. Mengen pro Portion; der Preis wird unten aus den Zutatenpreisen (prices.ts) berechnet.
 type RawRecipe = Omit<Recipe, 'pricePerPortion' | 'estimatedIngredients'>;
@@ -639,11 +639,12 @@ export const BUILTIN_IDS = new Set(RAW_RECIPES.map((r) => r.id));
 
 let lastKey = '';
 /** Eigene Rezepte und Preise einrechnen. Billig, wenn sich nichts geändert hat. */
-export function rebuildCatalog(custom: CustomRecipe[], userPrices: Record<string, UserPrice>) {
-  const key = JSON.stringify([custom, userPrices]);
+export function rebuildCatalog(custom: CustomRecipe[], userPrices: Record<string, UserPrice>, priceLevel = 1) {
+  const key = JSON.stringify([custom, userPrices, priceLevel]);
   if (key === lastKey) return;
   lastKey = key;
   setUserPrices(userPrices);
+  setPriceLevel(priceLevel);
   UNPRICED.clear();
   const all = [...RAW_RECIPES, ...custom].map(priced);
   RECIPES.splice(0, RECIPES.length, ...all);

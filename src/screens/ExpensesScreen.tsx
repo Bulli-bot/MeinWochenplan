@@ -2,9 +2,9 @@ import { useMemo, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Badge, BigPhoto, Field, Link, Thumb } from '../components';
 import { readReceiptAny } from '../ai';
-import { CATEGORY_LABEL, CATEGORY_ORDER, classify, learnPrice, sumBy, weekKey } from '../logic/receipt';
-import type { Purchase, PurchaseItem, SpendCategory, UserPrice } from '../types';
-import { Button, Chip, colors, euro, styles } from '../ui';
+import { CATEGORY_LABEL, CATEGORY_ORDER, bonKey, classifyWithMemory, isUnclear, learnPrice, matchIngredient, sumBy } from '../logic/receipt';
+import type { BonName, Purchase, PurchaseItem, SpendCategory, UserPrice } from '../types';
+import { Button, Card, Chip, Icon, colors, euro, hov, space, styles } from '../ui';
 import { getPhotoData } from '../photos';
 
 const TONE: Record<SpendCategory, string> = {
@@ -13,6 +13,7 @@ const TONE: Record<SpendCategory, string> = {
 
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' });
 const newId = () => `e${Date.now().toString(36)}`;
+const money = (n: number) => n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /** „31.10.2026" → ISO-Datum (Mittag, damit Zeitzonen nicht den Tag verschieben) */
 function parseDate(text: string): string {
@@ -22,15 +23,22 @@ function parseDate(text: string): string {
   return new Date(year, Number(m[2]) - 1, Number(m[1]), 12).toISOString();
 }
 
-export function ExpensesScreen({ purchases, budget, plannedCost, planIngredients, onSave, onDelete, onLearn, onBonPhoto }: {
+export function ExpensesScreen({ purchases, budget, plannedCost, planIngredients, bonNames, currentWeek, weekOf, onSave, onDelete, onLearn, onLearnName, onBonPhoto }: {
   purchases: Purchase[];
   budget: number;
   /** Geschätzte Kosten des aktuellen Wochenplans */
   plannedCost: number;
   planIngredients: Set<string>;
+  /** Gelernte Bon-Kürzel */
+  bonNames: Record<string, BonName>;
+  /** Montag der Woche, für die gerade eingekauft/gekocht wird */
+  currentWeek: string;
+  /** Zu welcher Woche ein Einkauf zählt */
+  weekOf: (iso: string) => string;
   onSave: (p: Purchase) => void;
   onDelete: (id: string) => void;
   onLearn: (prices: Record<string, UserPrice>) => void;
+  onLearnName: (key: string, value: BonName) => void;
   /** Foto aufnehmen, speichern, hochladen → Foto-ID */
   onBonPhoto: () => Promise<string | null>;
 }) {
@@ -42,13 +50,12 @@ export function ExpensesScreen({ purchases, budget, plannedCost, planIngredients
   const weeks = useMemo(() => {
     const map = new Map<string, Purchase[]>();
     for (const p of [...purchases].sort((a, b) => b.date.localeCompare(a.date))) {
-      const k = weekKey(p.date);
+      const k = weekOf(p.date);
       map.set(k, [...(map.get(k) ?? []), p]);
     }
     return [...map.entries()];
-  }, [purchases]);
+  }, [purchases, weekOf]);
 
-  const thisWeek = weekKey(new Date().toISOString());
   const pending = purchases.filter((p) => p.status === 'wartet');
   const open = purchases.find((p) => p.id === openId);
 
@@ -74,13 +81,14 @@ export function ExpensesScreen({ purchases, budget, plannedCost, planIngredients
       const image = await getPhotoData(p.photoId);
       if (!image) throw new Error('Foto noch nicht auf diesem Gerät – kurz warten, bis die Cloud es geladen hat.');
       const r = await readReceiptAny(image);
-      const items: PurchaseItem[] = r.artikel.map((a) => ({ name: a.name, price: a.preis, quantity: a.kg ?? undefined, ...classify(a.name, planIngredients) }));
+      const items: PurchaseItem[] = r.artikel.map((a) => ({ name: a.name, price: a.preis, quantity: a.kg ?? undefined, ...classifyWithMemory(a.name, planIngredients, bonNames) }));
       const sum = Math.round(items.reduce((s, i) => s + i.price, 0) * 100) / 100;
       const gap = r.summe ? Math.round((r.summe - sum) * 100) / 100 : 0;
       // Nicht erkannte Zeilen sichtbar machen statt sie stillschweigend in der Summe zu verstecken
       if (Math.abs(gap) >= 0.05) items.push({ name: 'Nicht erkannt (Rest zur Bon-Summe)', price: gap, category: 'extra' });
       onSave({ ...p, store: r.laden || 'Einkauf', date: r.datum ? parseDate(r.datum) : p.date, total: r.summe ?? sum, items, status: 'fertig' });
-      setNotice(`${items.length} Positionen erkannt (${r.model}). ${Math.abs(gap) >= 0.05 ? `${euro(gap)} nicht zugeordnet – steht unten als eigene Zeile.` : 'Summe stimmt mit dem Bon überein.'} Kategorien bitte kurz prüfen.`);
+      const unclear = items.filter(isUnclear).length;
+      setNotice(`${items.length} Positionen erkannt (${r.model}). ${Math.abs(gap) >= 0.05 ? `${euro(gap)} nicht zugeordnet – steht unten als eigene Zeile. ` : 'Summe stimmt mit dem Bon überein. '}${unclear ? `${unclear} Artikel kenne ich noch nicht – bitte kurz sagen, was das ist.` : 'Kategorien bitte kurz prüfen.'}`);
       setOpenId(p.id);
     } catch (e) {
       setNotice((e as Error).message);
@@ -90,11 +98,11 @@ export function ExpensesScreen({ purchases, budget, plannedCost, planIngredients
   };
 
   if (open) {
-    return <PurchaseDetail purchase={open} onBack={() => setOpenId(null)} onSave={onSave} onLearn={onLearn} notice={notice}
+    return <PurchaseDetail purchase={open} planIngredients={planIngredients} onBack={() => setOpenId(null)} onSave={onSave} onLearn={onLearn} onLearnName={onLearnName} notice={notice}
       onDelete={() => { onDelete(open.id); setOpenId(null); }} />;
   }
 
-  const current = weeks.find(([k]) => k === thisWeek)?.[1] ?? [];
+  const current = weeks.find(([k]) => k === currentWeek)?.[1] ?? [];
   const currentSum = current.reduce((s, p) => s + p.total, 0);
   const ratio = budget ? currentSum / budget : 0;
 
@@ -102,14 +110,14 @@ export function ExpensesScreen({ purchases, budget, plannedCost, planIngredients
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Text style={styles.h1}>Ausgaben</Text>
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Diese Woche</Text>
+        <Text style={styles.sectionTitle}>Woche ab {new Date(currentWeek).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}</Text>
         <Text style={[local.big, { color: ratio > 1 ? colors.danger : ratio > 0.85 ? colors.warn : colors.accent }]}>{euro(currentSum)}</Text>
         <Text style={styles.hint}>von {euro(budget)} Budget · Wochenplan geschätzt {euro(plannedCost)}</Text>
         <CategoryBar purchases={current} />
       </View>
 
       <View style={styles.row}>
-        <View style={{ flex: 1 }}><Button label="📷 Bon fotografieren" onPress={photoBon} /></View>
+        <View style={{ flex: 1 }}><Button label="Bon fotografieren" icon="camera" onPress={photoBon} /></View>
         <View style={{ flex: 1 }}><Button label="Betrag eintragen" variant="secondary" onPress={() => setManual((v) => !v)} /></View>
       </View>
       {manual ? <ManualEntry onSave={(p) => { onSave(p); setManual(false); }} /> : null}
@@ -137,32 +145,35 @@ export function ExpensesScreen({ purchases, budget, plannedCost, planIngredients
           <View key={week} style={styles.card}>
             <Text style={styles.sectionTitle}>Woche ab {new Date(week).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })} · {euro(sum)}</Text>
             <CategoryBar purchases={list} />
-            {list.filter((p) => p.status === 'fertig').map((p) => (
-              <Pressable key={p.id} onPress={() => setOpenId(p.id)} style={local.purchase}>
-                <Text style={local.title}>{fmtDate(p.date)} · {p.store || 'Einkauf'}</Text>
-                <Text style={local.amount}>{euro(p.total)} ›</Text>
-              </Pressable>
-            ))}
+            {list.filter((p) => p.status === 'fertig').map((p) => {
+              const unclear = p.items.filter(isUnclear).length;
+              return (
+                <Pressable key={p.id} onPress={() => setOpenId(p.id)} style={local.purchase}>
+                  <Text style={local.title}>{fmtDate(p.date)} · {p.store || 'Einkauf'}{unclear ? <Text style={[styles.hint, { color: colors.warn }]}>  · {unclear} unklar</Text> : null}</Text>
+                  <Text style={local.amount}>{euro(p.total)} ›</Text>
+                </Pressable>
+              );
+            })}
           </View>
         );
       })}
-      {!purchases.length ? <Text style={styles.hint}>Noch keine Einkäufe. Nach dem Einkaufen den Bon fotografieren – den Rest macht der PC.</Text> : null}
+      {!purchases.length ? <Text style={styles.hint}>Noch keine Einkäufe. Nach dem Einkaufen den Bon fotografieren – den Rest macht die KI.</Text> : null}
     </ScrollView>
   );
 }
 
-export function CategoryBar({ purchases }: { purchases: Purchase[] }) {
+export function CategoryBar({ purchases, compact }: { purchases: Purchase[]; compact?: boolean }) {
   const sums = sumBy(purchases);
   const total = CATEGORY_ORDER.reduce((s, c) => s + Math.max(0, sums[c]), 0);
   if (!total) return null;
   return (
-    <View style={{ gap: 6, marginTop: 8 }}>
-      <View style={local.bar}>
+    <View style={{ gap: 6, marginTop: compact ? 2 : 8 }}>
+      <View style={[local.bar, compact && { height: 8 }]}>
         {CATEGORY_ORDER.map((c) => (sums[c] > 0 ? <View key={c} style={{ flex: sums[c], backgroundColor: TONE[c] }} /> : null))}
       </View>
-      <View style={local.legend}>
+      <View style={[local.legend, compact && { flexDirection: 'column', gap: 2 }]}>
         {CATEGORY_ORDER.map((c) => (sums[c] > 0.004 ? (
-          <Text key={c} style={styles.hint}><Text style={{ color: TONE[c] }}>■</Text> {CATEGORY_LABEL[c]} {euro(sums[c])}</Text>
+          <Text key={c} style={[styles.hint, compact && { fontSize: 12 }]}><Text style={{ color: TONE[c] }}>■</Text> {CATEGORY_LABEL[c]} {euro(sums[c])}</Text>
         ) : null))}
       </View>
     </View>
@@ -189,27 +200,84 @@ function ManualEntry({ onSave }: { onSave: (p: Purchase) => void }) {
   );
 }
 
-function PurchaseDetail({ purchase, onBack, onSave, onDelete, onLearn, notice }: {
+/** Eine Bon-Zeile bearbeiten: Name, Preis, Kategorie – optional als Kürzel merken. */
+function ItemEditor({ item, onSave, onDelete, onCancel, ask }: {
+  item: PurchaseItem;
+  onSave: (it: PurchaseItem, remember: boolean) => void;
+  onDelete?: () => void;
+  onCancel: () => void;
+  /** Nachfrage-Modus für unbekannte Kürzel */
+  ask?: boolean;
+}) {
+  const [label, setLabel] = useState(item.label ?? (ask ? '' : item.name));
+  const [price, setPrice] = useState(money(item.price));
+  const [category, setCategory] = useState<SpendCategory>(item.category);
+  const [remember, setRemember] = useState(true);
+  const apply = () => {
+    const p = parseFloat(price.replace(',', '.'));
+    const clean = label.trim();
+    const ingredient = clean ? matchIngredient(clean) ?? item.ingredient : item.ingredient;
+    onSave({ ...item, label: clean && clean !== item.name ? clean : undefined, price: Number.isFinite(p) ? p : item.price, category, ingredient, known: true }, remember && !!clean);
+  };
+  return (
+    <View style={local.editor}>
+      <Text style={styles.hint}>Auf dem Bon: <Text style={{ color: colors.text, fontWeight: '700' }}>{item.name}</Text></Text>
+      <Field label={ask ? 'Was ist das?' : 'Name'} value={label} onChangeText={setLabel} placeholder="z. B. Toilettenpapier" autoFocus={ask} onSubmitEditing={apply} />
+      {!ask ? <Field label="Preis in €" value={price} onChangeText={setPrice} keyboardType="decimal-pad" /> : null}
+      <View style={styles.chipRow}>
+        {CATEGORY_ORDER.map((c) => <Chip key={c} label={CATEGORY_LABEL[c]} selected={category === c} onPress={() => setCategory(c)} />)}
+      </View>
+      <Pressable onPress={() => setRemember((v) => !v)} style={styles.row} accessibilityRole="checkbox" accessibilityState={{ checked: remember }}>
+        <View style={[local.box, remember && local.boxOn]}>{remember ? <Icon name="check" size={14} color={colors.onAccent} /> : null}</View>
+        <Text style={styles.hint}>Beim nächsten Bon automatisch so erkennen</Text>
+      </Pressable>
+      <View style={styles.row}>
+        <View style={{ flex: 1, minWidth: 120 }}><Button label="Übernehmen" icon="check" onPress={apply} /></View>
+        <View style={{ flex: 1, minWidth: 100 }}><Button label={ask ? 'Später' : 'Abbrechen'} variant="ghost" onPress={onCancel} /></View>
+      </View>
+      {onDelete ? <Pressable onPress={onDelete}><Text style={[styles.hint, { color: colors.danger }]}>Zeile löschen (nicht gekauft / doppelt gelesen)</Text></Pressable> : null}
+    </View>
+  );
+}
+
+function PurchaseDetail({ purchase, planIngredients, onBack, onSave, onDelete, onLearn, onLearnName, notice }: {
   purchase: Purchase;
+  planIngredients: Set<string>;
   onBack: () => void;
   onSave: (p: Purchase) => void;
   onDelete: () => void;
   onLearn: (prices: Record<string, UserPrice>) => void;
+  onLearnName: (key: string, value: BonName) => void;
   notice: string | null;
 }) {
   const [confirm, setConfirm] = useState(false);
   const [learned, setLearned] = useState<string | null>(null);
   const [total, setTotal] = useState(purchase.total ? String(purchase.total).replace('.', ',') : '');
   const [store, setStore] = useState(purchase.store);
-  const cycle = (idx: number) => {
-    const items = purchase.items.map((it, i) => (i === idx ? { ...it, category: CATEGORY_ORDER[(CATEGORY_ORDER.indexOf(it.category) + 1) % CATEGORY_ORDER.length] } : it));
-    onSave({ ...purchase, items });
-  };
+  const [editIdx, setEditIdx] = useState<number | null>(null);
+  const [skipped, setSkipped] = useState<number[]>([]);
   const sums = sumBy([purchase]);
   // Pro Zutat nur ein Preis (der letzte auf dem Bon)
   const prices = Object.entries(Object.fromEntries(
     purchase.items.map((it) => learnPrice(it, purchase.store, purchase.date)).filter((x): x is [string, UserPrice] => !!x),
   ));
+  const unclear = purchase.items.map((it, idx) => ({ it, idx })).filter(({ it, idx }) => isUnclear(it) && !skipped.includes(idx));
+  const asking = unclear[0];
+
+  const saveItem = (idx: number, it: PurchaseItem, remember: boolean) => {
+    // Gehört der neue Name zu einer Zutat dieser Woche, zählt er zum Wochenplan
+    const category = it.ingredient && planIngredients.has(it.ingredient) && it.category === 'extra' ? 'plan' : it.category;
+    const next = { ...it, category };
+    const items = purchase.items.map((x, i) => (i === idx ? next : x));
+    onSave({ ...purchase, items, total: purchase.items.length ? Math.round(items.reduce((s, x) => s + x.price, 0) * 100) / 100 || purchase.total : purchase.total });
+    if (remember && next.label) onLearnName(bonKey(next.name), { name: next.label, category: next.category, ingredient: next.ingredient });
+    setEditIdx(null);
+  };
+  const deleteItem = (idx: number) => {
+    const items = purchase.items.filter((_, i) => i !== idx);
+    onSave({ ...purchase, items, total: Math.round(items.reduce((s, x) => s + x.price, 0) * 100) / 100 });
+    setEditIdx(null);
+  };
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
@@ -229,21 +297,42 @@ function PurchaseDetail({ purchase, onBack, onSave, onDelete, onLearn, notice }:
         </View>
       ) : null}
 
+      {asking && editIdx === null ? (
+        <Card style={{ borderColor: colors.warn, gap: space.sm }}>
+          <View style={styles.row}>
+            <Icon name="help-circle" color={colors.warn} />
+            <Text style={styles.sectionTitle}>Was ist das? ({unclear.length} {unclear.length === 1 ? 'Artikel' : 'Artikel'} unklar)</Text>
+          </View>
+          <ItemEditor key={asking.idx} item={asking.it} ask
+            onSave={(it, remember) => saveItem(asking.idx, it, remember)}
+            onCancel={() => setSkipped((s) => [...s, asking.idx])} />
+          {unclear.length > 1 ? (
+            <Pressable onPress={() => onSave({ ...purchase, items: purchase.items.map((x) => (isUnclear(x) ? { ...x, known: true } : x)) })}>
+              <Text style={[styles.hint, { color: colors.accent }]}>Alle {unclear.length} passen so – nicht mehr fragen</Text>
+            </Pressable>
+          ) : null}
+        </Card>
+      ) : null}
+
       {purchase.items.length ? (
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Positionen</Text>
-          <Text style={styles.hint}>Auf die Kategorie tippen, um sie zu ändern.</Text>
+          <Text style={styles.hint}>Antippen zum Ändern von Name, Preis oder Kategorie.</Text>
           {CATEGORY_ORDER.map((c) => (sums[c] ? <Text key={c} style={styles.hint}><Text style={{ color: TONE[c] }}>■</Text> {CATEGORY_LABEL[c]}: {euro(sums[c])}</Text> : null))}
-          {purchase.items.map((it, idx) => (
-            <View key={idx} style={local.itemRow}>
+          {purchase.items.map((it, idx) => (editIdx === idx ? (
+            <ItemEditor key={idx} item={it} onSave={(x, remember) => saveItem(idx, x, remember)} onDelete={() => deleteItem(idx)} onCancel={() => setEditIdx(null)} />
+          ) : (
+            <Pressable key={idx} onPress={() => setEditIdx(idx)} accessibilityRole="button" style={(s) => [local.itemRow, hov(s) && { backgroundColor: colors.cardHover }]}>
               <View style={{ flex: 1 }}>
-                <Text style={local.itemName}>{it.name}</Text>
-                {it.ingredient ? <Text style={styles.hint}>→ {it.ingredient}</Text> : null}
+                <Text style={local.itemName}>{it.label ?? it.name}</Text>
+                {it.label ? <Text style={styles.hint}>Bon: {it.name}</Text> : null}
+                {it.ingredient && it.ingredient !== it.label ? <Text style={styles.hint}>→ {it.ingredient}</Text> : null}
               </View>
-              <Pressable onPress={() => cycle(idx)}><Badge label={CATEGORY_LABEL[it.category]} tone={it.category === 'verzichtbar' ? 'danger' : it.category === 'extra' ? 'warn' : it.category === 'plan' ? 'accent' : 'muted'} /></Pressable>
+              {isUnclear(it) ? <Badge label="unklar" tone="warn" /> : null}
+              <Badge label={CATEGORY_LABEL[it.category]} tone={it.category === 'verzichtbar' ? 'danger' : it.category === 'extra' ? 'warn' : it.category === 'plan' ? 'accent' : 'muted'} />
               <Text style={local.amount}>{euro(it.price)}</Text>
-            </View>
-          ))}
+            </Pressable>
+          )))}
         </View>
       ) : null}
 
@@ -271,6 +360,9 @@ const local = StyleSheet.create({
   title: { fontSize: 16, color: colors.text, fontWeight: '600' },
   purchase: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10, borderTopWidth: 1, borderTopColor: colors.border, marginTop: 6 },
   amount: { fontSize: 16, color: colors.text, fontVariant: ['tabular-nums'] },
-  itemRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.border },
+  itemRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, paddingHorizontal: 4, borderTopWidth: 1, borderTopColor: colors.border, borderRadius: 8 },
   itemName: { fontSize: 15, color: colors.text },
+  editor: { gap: 10, paddingVertical: 10, borderTopWidth: 1, borderTopColor: colors.border },
+  box: { width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
+  boxOn: { backgroundColor: colors.accent },
 });
