@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Field, Link } from '../components';
 import { knownIngredients } from '../data/recipes';
+import { mergeGrundausstattung, missingGrundausstattung } from '../data/grundausstattung';
 import { currentAmount, dueSoon, emptyOn } from '../logic/pantry';
 import type { PantryItem, PantryKind } from '../types';
 import { Button, Card, Chip, Icon, Stepper, colors, hov, space, styles } from '../ui';
@@ -96,6 +97,22 @@ export function PantryScreen({ pantry, onChange, onBack, onToShopping }: {
       <Link label="‹ Mehr" onPress={onBack} />
       <Text style={styles.h1}>Vorrat</Text>
       <Text style={styles.sub}>Lebensmittel, Getränke, Drogerie und Haushalt. Mit Verbrauch rechnet die App mit und erinnert dich, bevor etwas leer ist.</Text>
+
+      {missingGrundausstattung(pantry) > 0 ? (
+        <Card style={{ gap: space.sm, borderColor: colors.accent }}>
+          <View style={styles.row}><Icon name="package" color={colors.accent} /><Text style={styles.sectionTitle}>Grundausstattung</Text></View>
+          <Text style={styles.hint}>
+            Die Sachen, die bei euch immer da sein sollten – Milch, Wasser, Eistee, Duschgel, Shampoo, Zahnpasta, Toilettenpapier,
+            Spülmaschinentabs und mehr – mit sinnvollen Mengen und Erinnerung. Vorhandenes bleibt, nichts wird überschrieben.
+          </Text>
+          <Button label={`${missingGrundausstattung(pantry)} Artikel übernehmen`} icon="download" onPress={() => {
+            const r = mergeGrundausstattung(pantry);
+            onChange(r.pantry);
+            setMsg(`${r.added} Artikel zur Grundausstattung ergänzt – Mengen und Verbrauch kannst du je Artikel über den Stift anpassen.`);
+          }} />
+          {msg ? <Text style={styles.hint}>{msg}</Text> : null}
+        </Card>
+      ) : null}
 
       {soon.length ? (
         <Card style={{ borderColor: colors.warn, gap: space.sm }}>
