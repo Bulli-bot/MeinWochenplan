@@ -8,6 +8,8 @@ import { priceLevelFor } from './src/data/prices';
 import { BUILTIN_IDS, RECIPE_BY_ID, rebuildCatalog } from './src/data/recipes';
 import { budgetWeekKey, isoWeek, parseDay, planWeekKey, targetWeekStart, todayInPlan, weekRelation } from './src/logic/dates';
 import { findSwap, generatePlan, kidTally, planCost, type PlanContext } from './src/logic/generator';
+import { buildCalendarFeed, sameFeed } from './src/logic/calendar';
+import { applyRecurring, setRecurring } from './src/logic/recurring';
 import { deletePhotoData, newPhotoId, pickPhoto, savePhotoData } from './src/photos';
 import { AccountScreen } from './src/screens/AccountScreen';
 import { AiScreen } from './src/screens/AiScreen';
@@ -109,6 +111,23 @@ export default function App() {
     })();
   }, [approvedUser, loaded]);
   const { status: syncStatus, syncNow } = useCloudSync(state, loaded, replaceFromCloud, syncUser);
+
+  // Erst nach dem Abgleich mit der Cloud selbst etwas ändern – sonst überschreibt ein alter lokaler Stand
+  // womöglich einen neueren vom anderen Gerät.
+  const synced = loaded && !!syncUser && syncStatus.kind === 'ok';
+  const today = new Date().toDateString();
+  // Regelmäßige Artikel, die fällig sind, auf die Liste
+  useEffect(() => {
+    if (synced) setState((prev) => applyRecurring(prev));
+  }, [synced, state.recurring, today]);
+  // Auszug für das Kalender-Abo aktuell halten
+  useEffect(() => {
+    if (!synced) return;
+    const feed = buildCalendarFeed(state, state.plan, state.settings);
+    if (!sameFeed(feed, state.calendar)) {
+      setState((prev) => ({ ...prev, calendar: feed ? { ...feed, updated: new Date().toISOString() } : undefined }));
+    }
+  }, [synced, state, today]);
 
   const signOut = async () => {
     await auth.signOut();
@@ -422,6 +441,12 @@ export default function App() {
         amounts={state.shopAmounts ?? {}}
         purchases={state.purchases}
         prices={state.shopPrices ?? {}}
+        recurring={state.recurring ?? []}
+        onRecurring={(name, amount, days) => setState((prev) => ({ ...prev, recurring: setRecurring(prev.recurring, name, amount, days) }))}
+        catOrder={state.shopCatOrder}
+        onCatOrder={(order) => setState((prev) => ({ ...prev, shopCatOrder: order }))}
+        split={!!state.shopSplit}
+        onSplit={(on) => setState((prev) => ({ ...prev, shopSplit: on }))}
         onPrice={(name, price) => setState((prev) => {
           const key = name.trim().toLowerCase();
           const { [key]: _, ...rest } = prev.shopPrices ?? {};

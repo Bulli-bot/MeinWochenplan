@@ -25,24 +25,32 @@ const words = (name: string) => norm(name).split(/[^a-zäöüß0-9]+/).filter((w
  * verständlichen Namen) stehen – „Eistee“ findet „G&G Eistee 6x1,5l“, „stilles Wasser“
  * aber nicht „Gerol.Med.“.
  */
-export function lastBonPrice(name: string, purchases: Purchase[]): { price: number; store: string; date: string } | null {
+export function lastBonPrice(name: string, purchases: Purchase[]): { price: number; deposit: number; store: string; date: string } | null {
   const ws = words(name);
   if (!ws.length) return null;
   const sorted = [...purchases].filter((p) => p.status === 'fertig').sort((a, b) => b.date.localeCompare(a.date));
   for (const p of sorted) {
-    const hit = p.items.find((i) => {
-      if (!(i.price > 0)) return false;
+    const idx = p.items.findIndex((i) => {
+      if (!(i.price > 0) || i.category === 'pfand') return false;
       const text = norm(`${i.name} ${i.label ?? ''}`);
       return ws.every((w) => text.includes(w));
     });
-    if (hit) return { price: hit.price, store: p.store, date: p.date };
+    if (idx >= 0) return { price: p.items[idx].price, deposit: depositAfter(p, idx), store: p.store, date: p.date };
   }
   return null;
 }
 
+/** Pfand steht auf dem Bon als eigene Zeile direkt unter dem Getränk („Pfand 1,50“). */
+function depositAfter(p: Purchase, idx: number): number {
+  const next = p.items[idx + 1];
+  return next && next.price > 0 && (next.category === 'pfand' || /^pfand/i.test(next.name)) ? next.price : 0;
+}
+
 export interface ItemPrice {
-  /** Preis je Stück/Packung */
+  /** Preis je Stück/Packung (ohne Pfand) */
   each: number;
+  /** Pfand je Stück/Packung, wenn es auf dem Bon dabeistand */
+  deposit: number;
   count: number;
   total: number;
   source: 'eigen' | 'bon';
@@ -54,11 +62,13 @@ export interface ItemPrice {
 export function itemPrice(name: string, amount: string | undefined, own: Record<string, ShopPrice>, purchases: Purchase[]): ItemPrice | null {
   const count = countFromAmount(amount);
   const mine = own[norm(name)];
-  if (mine) return { each: mine.price, count, total: mine.price * count, source: 'eigen' };
   const bon = lastBonPrice(name, purchases);
+  // Pfand vom Bon gilt auch, wenn der Preis selbst eingetragen ist (Regalpreis ohne Pfand)
+  const deposit = bon?.deposit ?? 0;
+  if (mine) return { each: mine.price, deposit, count, total: (mine.price + deposit) * count, source: 'eigen' };
   if (!bon) return null;
   const day = new Date(bon.date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
-  return { each: bon.price, count, total: bon.price * count, source: 'bon', from: `${bon.store} ${day}`.trim() };
+  return { each: bon.price, deposit, count, total: (bon.price + deposit) * count, source: 'bon', from: `${bon.store} ${day}`.trim() };
 }
 
 export const shopPriceKey = norm;
@@ -67,7 +77,7 @@ export const shopPriceKey = norm;
  * Was beim nächsten Einkauf noch offen ist – Anzahl und Betrag, gerechnet wie in der Einkaufsliste
  * (Plan-Zutaten ohne Vorrat/Grundzutaten/Ausgeblendetes plus eigene Artikel).
  */
-export function openShopping(state: AppState, plan: MealPlan, settings: Settings): { count: number; cost: number; unpriced: number } {
+export function openShopping(state: AppState, plan: MealPlan, settings: Settings): { count: number; cost: number; unpriced: number; names: string[] } {
   const own = state.shopPrices ?? {};
   const amounts = state.shopAmounts ?? {};
   const hidden = state.shopHidden ?? [];
@@ -85,5 +95,65 @@ export function openShopping(state: AppState, plan: MealPlan, settings: Settings
     if (p) cost += p.total;
     else unpriced += 1;
   }
-  return { count: items.length + extras.length, cost, unpriced };
+  return { count: items.length + extras.length, cost, unpriced, names: [...extras.map((x) => x.name), ...items.map((i) => i.name)] };
+}
+
+// ---------- Preis-Vergleich der Läden ----------
+
+/** „ALDI SÜD“ und „Aldi“ sind derselbe Laden: erstes Wort, klein. */
+export const storeKey = (store: string) => norm(store).split(/\s+/)[0] ?? '';
+
+export interface StoreQuote {
+  store: string;
+  price: number;
+  /** €/kg bzw. €/l, wenn auf dem Bon ein Gewicht stand */
+  perKg?: number;
+  date: string;
+}
+
+/**
+ * Letzter Preis je Laden für einen Artikel, günstigster zuerst. Plan-Zutaten werden zusätzlich über die
+ * beim Bon zugeordnete Zutat gefunden.
+ */
+export function storeQuotes(name: string, purchases: Purchase[]): StoreQuote[] {
+  const ws = words(name);
+  if (!ws.length) return [];
+  const latest = new Map<string, StoreQuote>();
+  for (const p of purchases) {
+    if (p.status !== 'fertig' || !p.store.trim()) continue;
+    for (const i of p.items) {
+      if (!(i.price > 0) || i.category === 'pfand') continue;
+      const text = norm(`${i.name} ${i.label ?? ''}`);
+      if (!(i.ingredient && norm(i.ingredient) === norm(name)) && !ws.every((w) => text.includes(w))) continue;
+      const key = storeKey(p.store);
+      const old = latest.get(key);
+      if (!old || old.date < p.date) {
+        latest.set(key, { store: p.store.trim(), price: i.price, perKg: i.quantity ? i.price / i.quantity : undefined, date: p.date });
+      }
+    }
+  }
+  const list = [...latest.values()];
+  // Mit Gewicht vergleichbar nur, wenn alle eins haben – sonst Packungspreis
+  const byKg = list.length > 1 && list.every((q) => q.perKg);
+  return list.sort((a, b) => (byKg ? a.perKg! - b.perKg! : a.price - b.price));
+}
+
+/** Günstigster bekannter Laden – für das Aufteilen der Liste. */
+export const preferredStore = (name: string, purchases: Purchase[]): string | null => storeQuotes(name, purchases)[0]?.store ?? null;
+
+/**
+ * Hinweis, wenn der Artikel zuletzt anderswo teurer gekauft wurde: „bei ALDI 0,30 € günstiger“.
+ * Nur bei spürbarem Unterschied (ab 10 Cent und 5 %).
+ */
+export function cheaperElsewhere(name: string, purchases: Purchase[]): { store: string; saving: number } | null {
+  const quotes = storeQuotes(name, purchases);
+  if (quotes.length < 2) return null;
+  const last = [...quotes].sort((a, b) => b.date.localeCompare(a.date))[0];
+  const best = quotes[0];
+  if (storeKey(best.store) === storeKey(last.store)) return null;
+  const byKg = quotes.every((q) => q.perKg);
+  // Ersparnis in Packungspreis des letzten Kaufs umrechnen
+  const saving = byKg ? (last.perKg! - best.perKg!) * (last.price / last.perKg!) : last.price - best.price;
+  if (saving < 0.1 || saving / last.price < 0.05) return null;
+  return { store: best.store, saving };
 }

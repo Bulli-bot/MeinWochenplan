@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { ScrollView, Text } from 'react-native';
 import type { Allergen, Basic, Carb, Diet, Equipment, Protein, Settings, StoreLevel, Vibe, Weekday } from '../types';
 import { Field } from '../components';
+import { CalendarCard } from './CalendarCard';
 import { BASICS } from '../logic/shoppingList';
 import { DEFAULT_SETTINGS } from '../storage';
 import { Button, Chip, Section, Stepper, Toggle, WEEKDAYS, euro, styles } from '../ui';
@@ -94,6 +95,19 @@ export function SettingsScreen({ initial, isFirstRun, onSave, onSaveOnly, error,
         <Chip label="2x (mit Frische-Split)" selected={s.shopRhythm === 'zweimal'} onPress={() => set({ shopRhythm: 'zweimal' })} />
       </Section>
       {s.shopRhythm === 'zweimal' ? <Text style={styles.hint}>Frisches für Donnerstag bis Sonntag kommt auf einen zweiten Einkauf zur Wochenmitte.</Text> : null}
+
+      <Section title="Einkaufstage" hint="Für die Erinnerung im Kalender (siehe unten).">
+        {WEEKDAYS.map((d, idx) => (
+          <Chip key={d} label={d} selected={(s.shopDays ?? []).includes(idx as Weekday)}
+            onPress={() => set({ shopDays: toggle(s.shopDays ?? [], idx as Weekday) })} />
+        ))}
+      </Section>
+      {(s.shopDays ?? []).length ? (
+        <Section title="Uhrzeit des Einkaufs">
+          <Stepper value={s.shopHour ?? 10} min={6} max={21} label={`${s.shopHour ?? 10}:00 Uhr`} onChange={(v) => set({ shopHour: v })} />
+        </Section>
+      ) : null}
+      {!isFirstRun ? <CalendarCard hasShopDays={!!initial.shopDays?.length} /> : null}
 
       <Section title="Kochtage">
         {WEEKDAYS.map((d, idx) => (

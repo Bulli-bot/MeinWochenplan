@@ -4,12 +4,13 @@ import type { SyncStatus } from '../cloud';
 import { BigPhoto, Cover } from '../components';
 import { RECIPE_BY_ID } from '../data/recipes';
 import { greeting, isoWeek, planMonday, shortDate, slotDate, todayInPlan } from '../logic/dates';
-import { planCost, portionCost } from '../logic/generator';
+import { eligibleRecipes, planCost, portionCost } from '../logic/generator';
+import { leftoverIdeas, useSoon } from '../logic/leftovers';
 import { dueSoon, findPantry } from '../logic/pantry';
 import { openShopping } from '../logic/shopPrice';
 import { isBasic } from '../logic/shoppingList';
 import type { AppState, MealPlan, Purchase, Settings } from '../types';
-import { Button, Card, Eyebrow, Grid, Icon, Tag, WEEKDAYS, colors, euro, space, styles, useLayout, type IconName } from '../ui';
+import { Button, Card, Eyebrow, Grid, Icon, Tag, WEEKDAYS, colors, euro, hov, space, styles, useLayout, type IconName } from '../ui';
 import { CategoryBar } from './ExpensesScreen';
 import { WeekNav, relationLabel, type WeekNavProps } from './PlanScreen';
 
@@ -65,6 +66,9 @@ export function OverviewScreen({ state, settings, plan, isActive, nav, todayPlan
   const meals = plan.slots.filter((s) => !s.kind);
   const cookedCount = meals.filter((s) => cooked.includes(s.recipeId)).length;
   const soon = dueSoon(state.pantry);
+  const leftovers = useMemo(() => leftoverIdeas(eligibleRecipes({
+    settings, favourites: state.favourites, ratings: state.ratings, recentRecipeIds: state.recentRecipeIds, kidVotes: state.kidVotes, pantry: state.pantry,
+  }), state.pantry), [settings, state.favourites, state.ratings, state.recentRecipeIds, state.kidVotes, state.pantry]);
   const shop = useMemo(() => openShopping(state, plan, settings), [state, plan, settings]);
   const open = shop.count;
 
@@ -132,6 +136,27 @@ export function OverviewScreen({ state, settings, plan, isActive, nav, todayPlan
             );
           })}
           <Pressable onPress={() => onGo('vorrat')}><Text style={[styles.hint, { color: colors.accent }]}>Zum Vorrat ›</Text></Pressable>
+        </Card>
+      ) : null}
+
+      {leftovers.length ? (
+        <Card style={{ gap: space.sm }}>
+          <View style={styles.row}><Icon name="refresh-cw" color={colors.accent} /><Text style={styles.sectionTitle}>Reste verwerten</Text></View>
+          <Text style={styles.hint}>
+            Muss bald weg: {useSoon(state.pantry).map(({ item, days }) => `${item.name} (${days < 0 ? 'abgelaufen' : days === 0 ? 'heute' : days === 1 ? 'morgen' : `${days} Tage`})`).join(', ')}
+          </Text>
+          {leftovers.map((idea) => (
+            <Pressable key={idea.recipe.id} onPress={() => onOpen(idea.recipe.id)} style={(s) => [local.soonRow, hov(s) && { opacity: 0.85 }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.hint, { color: colors.text, fontWeight: '700' }]}>{idea.recipe.name}</Text>
+                <Text style={styles.hint}>
+                  verbraucht {idea.urgent.join(', ')}{idea.have.length ? ` · auch da: ${idea.have.slice(0, 3).join(', ')}` : ''}
+                </Text>
+              </View>
+              <Icon name="chevron-right" color={colors.muted} />
+            </Pressable>
+          ))}
+          <Text style={styles.hint}>Neue Pläne nehmen solche Gerichte bevorzugt. Für einen Tag: Woche → Tag → „Selbst aussuchen“.</Text>
         </Card>
       ) : null}
 

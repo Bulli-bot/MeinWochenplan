@@ -65,6 +65,10 @@ export interface Settings {
   shopRhythm?: 'einmal' | 'zweimal';
   /** Neue Pläne ab Freitag gelten für die kommende Woche (Standard) oder immer für die laufende */
   planWeek?: 'kommend' | 'laufend';
+  /** Einkaufstage für die Kalender-Erinnerung */
+  shopDays?: Weekday[];
+  /** Uhrzeit des Einkaufs (volle Stunde), Standard 10 */
+  shopHour?: number;
 }
 
 export type StoreLevel = 'discounter' | 'supermarkt' | 'mix';
@@ -120,6 +124,40 @@ export interface AppState {
   shopAmounts?: Record<string, string>;
   /** Selbst eingetragene Preise je Stück/Packung für die Einkaufsliste, Schlüssel = Name klein */
   shopPrices?: Record<string, ShopPrice>;
+  /** Eigene Reihenfolge der Ladenbereiche in der Einkaufsliste */
+  shopCatOrder?: Category[];
+  /** Einkaufsliste nach dem günstigsten Laden aufteilen */
+  shopSplit?: boolean;
+  /** Artikel, die regelmäßig von selbst auf die Liste kommen */
+  recurring?: RecurringItem[];
+  /** Auszug für das Kalender-Abo (wird von der App geschrieben, vom Server gelesen) */
+  calendar?: CalendarFeed;
+}
+
+export interface RecurringItem {
+  id: string;
+  name: string;
+  amount?: string;
+  everyDays: number;
+  /** Nächstes Mal auf die Liste (ISO-Datum) */
+  next: string;
+}
+
+export interface CalendarFeed {
+  /** ISO-Zeitpunkt der letzten Aktualisierung */
+  updated: string;
+  shopDays: Weekday[];
+  shopHour: number;
+  openCost: number;
+  openCount: number;
+  /** Offene Artikel (Auszug) für die Beschreibung */
+  items: string[];
+  /** Bald leer: Name und Datum (ISO) */
+  empty: { name: string; date: string; remind: number }[];
+  /** Reste aufbrauchen: Name und Haltbarkeitsdatum (ISO) */
+  useBy: { name: string; date: string }[];
+  /** Regelmäßige Artikel: nächstes Mal */
+  recurring: { name: string; date: string }[];
 }
 
 export interface ShopPrice {
@@ -135,7 +173,7 @@ export interface ShopExtra {
   amount?: string;
   done?: boolean;
   /** Woher: selbst eingetragen oder aus der Vorrats-Erinnerung */
-  from?: 'eigen' | 'vorrat';
+  from?: 'eigen' | 'vorrat' | 'regelmaessig';
 }
 
 export interface BonName {
@@ -164,6 +202,8 @@ export interface PantryItem {
   since?: string;
   /** So viele Tage vor „leer“ erinnern (Standard 1) */
   remindDays?: number;
+  /** Haltbar bis (ISO-Datum) – für den Reste-Vorschlag */
+  useBy?: string;
 }
 
 export type SpendCategory = 'plan' | 'grund' | 'extra' | 'verzichtbar' | 'pfand';

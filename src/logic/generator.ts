@@ -1,5 +1,6 @@
 import { RECIPES } from '../data/recipes';
 import type { Diet, KidVote, MealPlan, PantryItem, PlanSlot, Protein, Recipe, Settings, Weekday } from '../types';
+import { useSoon } from './leftovers';
 
 export interface PlanContext {
   settings: Settings;
@@ -86,6 +87,9 @@ function baseScore(recipe: Recipe, ctx: PlanContext): number {
   if (ctx.pantry?.length) {
     const have = new Set(ctx.pantry.map((p) => p.name.toLowerCase()));
     score += Math.min(recipe.ingredients.filter((x) => have.has(x.name.toLowerCase())).length, 3) * 0.8;
+    // Reste, die bald ablaufen, wiegen deutlich mehr
+    const soon = new Set(useSoon(ctx.pantry, 5).map((x) => x.item.name.toLowerCase()));
+    score += Math.min(recipe.ingredients.filter((x) => soon.has(x.name.toLowerCase())).length, 2) * 2.5;
   }
   return score;
 }

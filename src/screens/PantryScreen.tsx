@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Field, Link } from '../components';
 import { knownIngredients } from '../data/recipes';
 import { mergeGrundausstattung, missingGrundausstattung } from '../data/grundausstattung';
+import { daysToUseBy, useByIn } from '../logic/leftovers';
 import { currentAmount, dueSoon, emptyOn } from '../logic/pantry';
 import type { PantryItem, PantryKind } from '../types';
 import { Button, Card, Chip, Icon, Stepper, colors, hov, space, styles } from '../ui';
@@ -21,6 +22,9 @@ export function guessKind(name: string): PantryKind {
   if (/wasser|saft|schorle|cola|limo|bier|wein|sprudel|kaffee|\btee\b/i.test(name)) return 'getraenke';
   return 'lebensmittel';
 }
+
+/** Haltbarkeit: Tage ab heute (0 = keine Angabe) */
+const KEEPS: [number, string][] = [[0, 'egal'], [1, 'morgen'], [2, '2 Tage'], [4, '4 Tage'], [7, '1 Woche'], [14, '2 Wochen']];
 
 const fmt = (n: number) => n.toLocaleString('de-DE', { maximumFractionDigits: 2 });
 const dayLabel = (d: Date) => d.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' });
@@ -46,6 +50,9 @@ function ItemForm({ initial, names, onSave, onCancel }: {
   const [use, setUse] = useState(initial?.perDay ? fmt(initial.perDay) : '');
   const [usePer, setUsePer] = useState<'tag' | 'woche'>('tag');
   const [remind, setRemind] = useState(initial?.remindDays ?? 1);
+  const keepNow = initial ? daysToUseBy(initial) : null;
+  /** null = unverändert lassen (bestehendes Datum), Zahl = neu ab heute */
+  const [keep, setKeep] = useState<number | null>(null);
   const q = name.trim().toLowerCase();
   const suggestions = q.length >= 2 && names ? names.filter((n) => n.toLowerCase().includes(q) && n.toLowerCase() !== q).slice(0, 8) : [];
 
@@ -60,9 +67,10 @@ function ItemForm({ initial, names, onSave, onCancel }: {
       kind: kindTouched ? kind : guessKind(clean),
       ...(value !== undefined ? { amount: value, unit, since: new Date().toISOString() } : {}),
       ...(perDay ? { perDay: Math.round(perDay * 1000) / 1000, remindDays: remind } : {}),
+      ...(keep === null ? (initial?.useBy ? { useBy: initial.useBy } : {}) : keep > 0 ? { useBy: useByIn(keep) } : {}),
     }, perDay, remind);
     if (!initial) {
-      setName(''); setAmount(''); setUse(''); setRemind(1); setKindTouched(false); setKind('lebensmittel');
+      setName(''); setAmount(''); setUse(''); setRemind(1); setKindTouched(false); setKind('lebensmittel'); setKeep(null);
     }
   };
 
@@ -91,6 +99,16 @@ function ItemForm({ initial, names, onSave, onCancel }: {
             </View>
           ) : null}
         </>
+      ) : null}
+      {kind === 'lebensmittel' ? (
+        <View style={{ gap: 6 }}>
+          <Text style={styles.hint}>
+            Hält noch – für den Reste-Vorschlag{keep === null && keepNow !== null ? ` (jetzt: ${keepNow < 0 ? 'abgelaufen' : keepNow === 0 ? 'bis heute' : `${keepNow} ${keepNow === 1 ? 'Tag' : 'Tage'}`})` : ''}:
+          </Text>
+          <View style={styles.chipRow}>
+            {KEEPS.map(([d, label]) => <Chip key={d} label={label} selected={keep === d || (keep === null && d === 0 && keepNow === null)} onPress={() => setKeep(d)} />)}
+          </View>
+        </View>
       ) : null}
       <View style={styles.row}>
         <View style={{ flex: 1, minWidth: 160 }}><Button label={initial ? 'Speichern' : 'Hinzufügen'} icon="check" onPress={save} /></View>
@@ -195,6 +213,7 @@ export function PantryScreen({ pantry, onChange, onBack, onToShopping }: {
           const ratio = p.perDay && p.amount ? (left ?? 0) / p.amount : null;
           const due = soon.some((s) => s.item === p);
           const isOpen = open === p.name;
+          const keepDays = daysToUseBy(p);
           return (
             <View key={p.name} style={[local.item, isOpen && local.itemOpen]}>
               <View style={local.row}>
@@ -204,6 +223,11 @@ export function PantryScreen({ pantry, onChange, onBack, onToShopping }: {
                     {left === undefined ? 'genug da' : `${fmt(left)} ${p.unit ?? ''}`}
                     {p.perDay ? ` · ${fmt(p.perDay)}/Tag · leer ca. ${empty ? dayLabel(empty) : '–'}` : ''}
                   </Text>
+                  {keepDays !== null ? (
+                    <Text style={[styles.hint, { color: keepDays <= 1 ? colors.danger : keepDays <= 3 ? colors.warn : colors.muted }]}>
+                      {keepDays < 0 ? 'abgelaufen' : `hält bis ${dayLabel(new Date(p.useBy!))}`}
+                    </Text>
+                  ) : null}
                   {ratio !== null ? (
                     <View style={local.track}><View style={[local.fill, { width: `${Math.max(3, Math.min(100, ratio * 100))}%`, backgroundColor: due ? colors.warn : colors.accent }]} /></View>
                   ) : null}

@@ -139,6 +139,8 @@ export function ExpensesScreen({ purchases, budget, plannedCost, planIngredients
         </View>
       ))}
 
+      <MonthOverview purchases={purchases.filter((p) => p.status === 'fertig')} />
+
       {weeks.map(([week, list]) => {
         const sum = list.reduce((s, p) => s + p.total, 0);
         return (
@@ -159,6 +161,91 @@ export function ExpensesScreen({ purchases, budget, plannedCost, planIngredients
       })}
       {!purchases.length ? <Text style={styles.hint}>Noch keine Einkäufe. Nach dem Einkaufen den Bon fotografieren – den Rest macht die KI.</Text> : null}
     </ScrollView>
+  );
+}
+
+const monthKey = (iso: string) => iso.slice(0, 7);
+const monthLabel = (key: string, long = false) =>
+  new Date(`${key}-15`).toLocaleDateString('de-DE', long ? { month: 'long', year: 'numeric' } : { month: 'short' });
+
+/** Monate nebeneinander: Summe, Kategorien, Trend bei „verzichtbar“ und die teuersten Artikel. */
+function MonthOverview({ purchases }: { purchases: Purchase[] }) {
+  const months = useMemo(() => {
+    const map = new Map<string, Purchase[]>();
+    for (const p of purchases) {
+      const k = monthKey(p.date);
+      map.set(k, [...(map.get(k) ?? []), p]);
+    }
+    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b)).slice(-6);
+  }, [purchases]);
+  const [sel, setSel] = useState<string | null>(null);
+  if (!months.length) return null;
+  const idx = Math.max(0, months.findIndex(([k]) => k === sel));
+  const selIdx = sel ? idx : months.length - 1;
+  const [key, list] = months[selIdx];
+  const prev = selIdx > 0 ? months[selIdx - 1][1] : null;
+  const total = (l: Purchase[]) => l.reduce((s, p) => s + p.total, 0);
+  const max = Math.max(...months.map(([, l]) => total(l)), 1);
+  const sums = sumBy(list);
+  const prevSums = prev ? sumBy(prev) : null;
+  const diff = prev ? total(list) - total(prev) : null;
+  const waste = prevSums ? sums.verzichtbar - prevSums.verzichtbar : null;
+
+  // Teuerste Artikel des Monats (gleiche Artikel zusammengezählt, ohne Pfand)
+  const top = new Map<string, { name: string; sum: number; count: number }>();
+  for (const p of list) {
+    for (const i of p.items) {
+      if (i.price <= 0 || i.category === 'pfand') continue;
+      const name = i.label || i.name;
+      const k = name.toLowerCase();
+      const t = top.get(k) ?? { name, sum: 0, count: 0 };
+      t.sum += i.price;
+      t.count += 1;
+      top.set(k, t);
+    }
+  }
+  const topList = [...top.values()].sort((a, b) => b.sum - a.sum).slice(0, 5);
+
+  return (
+    <View style={[styles.card, { gap: space.sm }]}>
+      <Text style={styles.sectionTitle}>Monate</Text>
+      <View style={local.months}>
+        {months.map(([k, l], i) => {
+          const sum = total(l);
+          const on = i === selIdx;
+          return (
+            <Pressable key={k} onPress={() => setSel(k)} style={local.monthCol} accessibilityLabel={`${monthLabel(k, true)}: ${euro(sum)}`}>
+              <Text style={[styles.hint, { fontSize: 11 }]}>{Math.round(sum)} €</Text>
+              <View style={local.monthTrack}>
+                <View style={[local.monthFill, { height: `${Math.max(4, (sum / max) * 100)}%`, backgroundColor: on ? colors.accent : colors.border }]} />
+              </View>
+              <Text style={[styles.hint, on && { color: colors.text, fontWeight: '700' }]}>{monthLabel(k)}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <Text style={styles.h2}>{monthLabel(key, true)} · {euro(total(list))}</Text>
+      <Text style={styles.hint}>
+        {list.length} Einkäufe{diff !== null ? ` · ${diff > 0 ? '+' : '−'}${euro(Math.abs(diff))} zum Vormonat` : ''}
+      </Text>
+      <CategoryBar purchases={list} />
+      {waste !== null ? (
+        <Text style={[styles.hint, { color: waste > 0 ? colors.warn : colors.accent }]}>
+          Verzichtbar: {euro(sums.verzichtbar)} – {waste > 0.004 ? `${euro(waste)} mehr` : waste < -0.004 ? `${euro(-waste)} weniger` : 'gleich viel'} als im Vormonat
+        </Text>
+      ) : null}
+      {topList.length ? (
+        <View style={{ gap: 2 }}>
+          <Text style={[styles.hint, { fontWeight: '700', color: colors.text }]}>Am teuersten</Text>
+          {topList.map((t) => (
+            <View key={t.name} style={local.topRow}>
+              <Text style={[styles.hint, { flex: 1, color: colors.text }]} numberOfLines={1}>{t.name}{t.count > 1 ? <Text style={styles.hint}> · {t.count}×</Text> : null}</Text>
+              <Text style={[styles.hint, { color: colors.text }]}>{euro(t.sum)}</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -352,6 +439,11 @@ function PurchaseDetail({ purchase, planIngredients, onBack, onSave, onDelete, o
 }
 
 const local = StyleSheet.create({
+  months: { flexDirection: 'row', gap: 8, alignItems: 'flex-end' },
+  monthCol: { flex: 1, alignItems: 'center', gap: 4 },
+  monthTrack: { height: 80, width: '100%', maxWidth: 44, justifyContent: 'flex-end' },
+  monthFill: { width: '100%', borderRadius: 6 },
+  topRow: { flexDirection: 'row', gap: 8 },
   big: { fontSize: 34, fontWeight: '800' },
   bar: { flexDirection: 'row', height: 12, borderRadius: 6, overflow: 'hidden', backgroundColor: colors.input },
   legend: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },

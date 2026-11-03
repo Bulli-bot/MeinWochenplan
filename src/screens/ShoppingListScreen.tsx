@@ -3,10 +3,11 @@ import { Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, Vi
 import { ingredientCost } from '../data/prices';
 import { sendToBring } from '../bring';
 import { applyPantry } from '../logic/pantry';
-import { itemPrice, lastBonPrice, shopPriceKey } from '../logic/shopPrice';
+import { RECURRING_CHOICES, findRecurring } from '../logic/recurring';
+import { cheaperElsewhere, itemPrice, lastBonPrice, preferredStore, shopPriceKey, storeKey } from '../logic/shopPrice';
 import { CATEGORY_ORDER, buildShoppingList, formatAmount, isBasic, shoppingListAsText, shoppingTrip, type ShoppingItem } from '../logic/shoppingList';
-import type { MealPlan, PantryItem, Purchase, Settings, ShopExtra, ShopPrice } from '../types';
-import { Button, Grid, Icon, colors, euro, hov, space, styles, useLayout } from '../ui';
+import type { Category, MealPlan, PantryItem, Purchase, RecurringItem, Settings, ShopExtra, ShopPrice } from '../types';
+import { Button, Chip, Grid, Icon, colors, euro, hov, space, styles, useLayout } from '../ui';
 
 const itemCost = (it: ShoppingItem) => ingredientCost({ name: it.name, amount: it.amount, unit: it.unit, category: it.category }) ?? 0;
 
@@ -22,6 +23,10 @@ interface Tile {
   ownPrice?: number;
   /** Vorschlag im Preisfeld, z. B. vom letzten Bon */
   priceHint?: string;
+  /** Hinweis „bei ALDI 0,30 € günstiger“ */
+  tip?: string;
+  /** Nur eigene Artikel: kommt alle X Tage wieder (0 = nie) */
+  repeat?: number;
 }
 
 function TileView({ tile, editing, onToggle, onEdit, onDelete, onSave, onHave, onCancel }: {
@@ -30,7 +35,7 @@ function TileView({ tile, editing, onToggle, onEdit, onDelete, onSave, onHave, o
   onToggle: () => void;
   onEdit: () => void;
   onDelete: () => void;
-  onSave: (name: string, amount: string, price: string) => void;
+  onSave: (name: string, amount: string, price: string, repeat: number) => void;
   /** Nur Plan-Zutaten: „hab ich noch“ → Vorrat */
   onHave?: () => void;
   onCancel: () => void;
@@ -38,7 +43,8 @@ function TileView({ tile, editing, onToggle, onEdit, onDelete, onSave, onHave, o
   const [name, setName] = useState(tile.name);
   const [amount, setAmount] = useState(tile.amount);
   const [price, setPrice] = useState(tile.ownPrice !== undefined ? tile.ownPrice.toFixed(2).replace('.', ',') : '');
-  const save = () => onSave(name, amount, price);
+  const [repeat, setRepeat] = useState(tile.repeat ?? 0);
+  const save = () => onSave(name, amount, price, repeat);
   if (editing) {
     return (
       <View style={[local.tile, local.tileEdit]}>
@@ -49,6 +55,19 @@ function TileView({ tile, editing, onToggle, onEdit, onDelete, onSave, onHave, o
           style={[styles.input, local.input]} autoFocus={!tile.extra} onSubmitEditing={save} />
         <TextInput value={price} onChangeText={setPrice} placeholder={tile.priceHint ?? 'Preis je Stück/Packung in €'} placeholderTextColor={colors.muted}
           keyboardType="decimal-pad" style={[styles.input, local.input]} onSubmitEditing={save} accessibilityLabel="Preis je Stück oder Packung" />
+        {tile.extra ? (
+          <View style={{ gap: 4 }}>
+            <Text style={styles.hint}>Kommt wieder alle:</Text>
+            <View style={local.repeatRow}>
+              {RECURRING_CHOICES.map(([d, label]) => (
+                <Pressable key={d} onPress={() => setRepeat(d)} accessibilityRole="radio" accessibilityState={{ selected: repeat === d }}
+                  style={[local.repeatChip, repeat === d && local.repeatOn]}>
+                  <Text style={[local.repeatText, repeat === d && { color: colors.onAccent }]}>{label}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ) : null}
         <View style={local.editBtns}>
           <Pressable onPress={save} accessibilityRole="button" accessibilityLabel="Speichern" style={[local.editBtn, { backgroundColor: colors.accent }]}>
             <Icon name="check" size={16} color={colors.onAccent} />
@@ -80,13 +99,15 @@ function TileView({ tile, editing, onToggle, onEdit, onDelete, onSave, onHave, o
       <Text style={[local.name, tile.done && local.nameDone]} numberOfLines={2}>{tile.name}</Text>
       <Text style={local.amount} numberOfLines={1}>{tile.amount || ' '}</Text>
       <Text style={styles.hint} numberOfLines={2}>{tile.sub}</Text>
+      {tile.tip && !tile.done ? <Text style={[styles.hint, { color: colors.warn }]} numberOfLines={1}>{tile.tip}</Text> : null}
+      {tile.repeat ? <Text style={[styles.hint, { color: colors.accent }]} numberOfLines={1}>↻ alle {tile.repeat} Tage</Text> : null}
     </Pressable>
   );
 }
 
 export function ShoppingListScreen({
-  plan, settings, checked, pantry, extras, hidden, amounts, purchases, prices,
-  onPrice, onToggle, onReset, onHave, onShopped, onAddExtra, onToggleExtra, onRemoveExtra, onEditExtra, onHide, onAmount,
+  plan, settings, checked, pantry, extras, hidden, amounts, purchases, prices, recurring, catOrder, split,
+  onPrice, onRecurring, onCatOrder, onSplit, onToggle, onReset, onHave, onShopped, onAddExtra, onToggleExtra, onRemoveExtra, onEditExtra, onHide, onAmount,
 }: {
   plan: MealPlan;
   settings: Settings;
@@ -103,6 +124,15 @@ export function ShoppingListScreen({
   prices: Record<string, ShopPrice>;
   /** Preis merken (undefined = eigenen Preis löschen) */
   onPrice: (name: string, price: number | undefined) => void;
+  recurring: RecurringItem[];
+  /** Regelmäßigkeit eines eigenen Artikels setzen (0 = aus) */
+  onRecurring: (name: string, amount: string | undefined, everyDays: number) => void;
+  /** Eigene Reihenfolge der Ladenbereiche */
+  catOrder?: Category[];
+  onCatOrder: (order: Category[] | undefined) => void;
+  /** Nach günstigstem Laden aufteilen */
+  split: boolean;
+  onSplit: (on: boolean) => void;
   onToggle: (key: string) => void;
   onReset: () => void;
   /** „Hab ich noch" → in den Vorrat */
@@ -137,10 +167,25 @@ export function ShoppingListScreen({
   const unpriced = openExtras.filter((x) => !extraPrice(x)).length;
   const openCost = items.filter((i) => !checked.includes(i.key)).reduce((s, i) => s + planCost(i), 0)
     + openExtras.reduce((s, x) => s + (extraPrice(x)?.total ?? 0), 0);
-  const twoTrips = settings.shopRhythm === 'zweimal';
+  const twoTrips = settings.shopRhythm === 'zweimal' && !split;
+  const order: Category[] = catOrder?.length === CATEGORY_ORDER.length && CATEGORY_ORDER.every((c) => catOrder.includes(c)) ? catOrder : CATEGORY_ORDER;
+  const [orderOpen, setOrderOpen] = useState(false);
+  const moveCat = (cat: Category, dir: -1 | 1) => {
+    const list = [...order];
+    const i = list.indexOf(cat);
+    const j = i + dir;
+    if (j < 0 || j >= list.length) return;
+    [list[i], list[j]] = [list[j], list[i]];
+    onCatOrder(list);
+  };
+  const tipFor = (name: string) => {
+    const c = cheaperElsewhere(name, purchases);
+    return c ? `bei ${c.store} ${euro(c.saving)} günstiger` : undefined;
+  };
 
   const priceText = (p: NonNullable<ReturnType<typeof itemPrice>>) => {
-    const each = p.count !== 1 ? `${euro(p.total)} (${p.count.toLocaleString('de-DE')} × ${euro(p.each)})` : euro(p.total);
+    const one = p.deposit ? `${euro(p.each)} + ${euro(p.deposit)} Pfand` : euro(p.each);
+    const each = p.count !== 1 ? `${euro(p.total)} (${p.count.toLocaleString('de-DE')} × ${one})` : p.deposit ? `${euro(p.total)} (${one})` : euro(p.total);
     return p.source === 'eigen' ? `${each} · dein Preis` : `${each} · ${p.from}`;
   };
   const planTile = (it: ShoppingItem): Tile => {
@@ -153,6 +198,7 @@ export function ShoppingListScreen({
       done: checked.includes(it.key),
       ownPrice: prices[shopPriceKey(it.name)]?.price,
       priceHint: `Preis €, ca. ${euro(itemCost(it))}`,
+      tip: tipFor(it.name),
     };
   };
   const extraTile = (x: ShopExtra): Tile => {
@@ -161,6 +207,8 @@ export function ShoppingListScreen({
     return {
       key: x.id, name: x.name, amount: x.amount ?? '',
       sub: p ? priceText(p) : x.from === 'vorrat' ? 'Vorrat – Preis? Stift antippen' : 'Preis? Stift antippen',
+      tip: tipFor(x.name),
+      repeat: findRecurring(recurring, x.name)?.everyDays,
       done: !!x.done, extra: x,
       ownPrice: prices[shopPriceKey(x.name)]?.price,
       priceHint: bon ? `Preis €, zuletzt ${euro(bon.price)}` : 'Preis € je Stück',
@@ -227,11 +275,12 @@ export function ShoppingListScreen({
       onEdit={() => setEditing(t.key)}
       onCancel={() => setEditing(null)}
       onDelete={() => { setEditing(null); if (t.extra) onRemoveExtra(t.extra.id); else onHide(t.key, true); }}
-      onSave={(name, amount, price) => {
+      onSave={(name, amount, price, repeat) => {
         const value = parseFloat(price.replace(',', '.').replace(/[^0-9.]/g, ''));
         const own = Number.isFinite(value) && value > 0 ? Math.round(value * 100) / 100 : undefined;
         const finalName = t.extra ? name.trim() || t.name : t.name;
         if (own !== t.ownPrice) onPrice(finalName, own);
+        if (t.extra && repeat !== (t.repeat ?? 0)) onRecurring(finalName, amount, repeat);
         if (t.extra) onEditExtra(t.extra.id, name.trim() || t.name, amount.trim());
         else {
           // Unveränderte Menge nicht als eigene Angabe speichern
@@ -251,7 +300,23 @@ export function ShoppingListScreen({
       <Grid columns={columns} gap={space.sm}>{tiles.map(renderTile)}</Grid>
     </View>
   ) : null);
-  const byCategory = (list: ShoppingItem[]) => CATEGORY_ORDER.map((cat) => section(cat, list.filter((i) => i.category === cat && !checked.includes(i.key)).map(planTile)));
+  const byCategory = (list: ShoppingItem[], prefix = '') => order.map((cat) => section(`${prefix}${cat}`, list.filter((i) => i.category === cat && !checked.includes(i.key)).map(planTile)));
+
+  // Nach Laden aufteilen: jeder Artikel dorthin, wo er laut Bons am günstigsten war
+  const openItems = items.filter((i) => !checked.includes(i.key));
+  const stores = useMemo(() => {
+    if (!split) return [];
+    const groups = new Map<string, { store: string; plan: ShoppingItem[]; extras: ShopExtra[] }>();
+    const put = (name: string) => {
+      const store = preferredStore(name, purchases) ?? 'Egal wo';
+      const key = store === 'Egal wo' ? '~' : storeKey(store);
+      if (!groups.has(key)) groups.set(key, { store, plan: [], extras: [] });
+      return groups.get(key)!;
+    };
+    for (const it of openItems) put(it.name).plan.push(it);
+    for (const x of openExtras) put(x.name).extras.push(x);
+    return [...groups.entries()].sort(([a], [b]) => (a === '~' ? 1 : b === '~' ? -1 : a.localeCompare(b))).map(([, g]) => g);
+  }, [split, openItems, openExtras, purchases]);
 
   const trip1 = items.filter((i) => shoppingTrip(i, settings.shopRhythm) === 1);
   const trip2 = items.filter((i) => shoppingTrip(i, settings.shopRhythm) === 2);
@@ -272,12 +337,46 @@ export function ShoppingListScreen({
           <Icon name="plus" size={20} color={colors.onAccent} />
         </Pressable>
       </View>
-      <Text style={styles.hint}>Kachel antippen = im Wagen. Stift = Menge und Preis ändern, Mülleimer = diese Woche nicht kaufen.</Text>
+      <Text style={styles.hint}>Kachel antippen = im Wagen. Stift = Menge, Preis und Wiederholen ändern, Mülleimer = diese Woche nicht kaufen.</Text>
 
-      {section('Eigene Artikel', extras.filter((x) => !x.done).map(extraTile))}
+      <View style={styles.chipRow}>
+        <Chip label="Nach Laden aufteilen" selected={split} onPress={() => onSplit(!split)} />
+        <Chip label="Reihenfolge der Bereiche" selected={orderOpen} onPress={() => setOrderOpen(!orderOpen)} />
+      </View>
+      {orderOpen ? (
+        <View style={[styles.card, { gap: 6 }]}>
+          <Text style={styles.hint}>So, wie du durch den Laden gehst – von oben nach unten.</Text>
+          {order.map((cat, i) => (
+            <View key={cat} style={local.orderRow}>
+              <Text style={[styles.hint, { flex: 1, color: colors.text }]}>{i + 1}. {cat}</Text>
+              <Pressable onPress={() => moveCat(cat, -1)} disabled={i === 0} accessibilityLabel={`${cat} nach oben`} style={(st) => [local.iconBtn, hov(st) && local.iconHover, i === 0 && { opacity: 0.3 }]}>
+                <Icon name="arrow-up" size={14} color={colors.text} />
+              </Pressable>
+              <Pressable onPress={() => moveCat(cat, 1)} disabled={i === order.length - 1} accessibilityLabel={`${cat} nach unten`} style={(st) => [local.iconBtn, hov(st) && local.iconHover, i === order.length - 1 && { opacity: 0.3 }]}>
+                <Icon name="arrow-down" size={14} color={colors.text} />
+              </Pressable>
+            </View>
+          ))}
+          {order !== CATEGORY_ORDER ? <Pressable onPress={() => onCatOrder(undefined)}><Text style={[styles.hint, { color: colors.accent }]}>Standard-Reihenfolge</Text></Pressable> : null}
+        </View>
+      ) : null}
+
+      {split ? stores.map((g) => {
+        const cost = g.plan.reduce((sum, i) => sum + planCost(i), 0) + g.extras.reduce((sum, x) => sum + (extraPrice(x)?.total ?? 0), 0);
+        return (
+          <View key={g.store} style={{ gap: space.sm }}>
+            <Text style={styles.h2}>{g.store} <Text style={styles.hint}>· ca. {euro(cost)}</Text></Text>
+            {g.store === 'Egal wo' ? <Text style={styles.hint}>Noch auf keinem Bon – oder nur in einem Laden gekauft.</Text> : null}
+            {section(`${g.store} · Eigene Artikel`, g.extras.map(extraTile))}
+            {byCategory(g.plan, `${g.store} · `)}
+          </View>
+        );
+      }) : null}
+
+      {!split ? section('Eigene Artikel', openExtras.map(extraTile)) : null}
 
       {twoTrips ? <Text style={styles.h2}>Wocheneinkauf</Text> : null}
-      {byCategory(trip1)}
+      {!split ? byCategory(settings.shopRhythm === 'zweimal' ? trip1 : items) : null}
       {twoTrips && trip2.some((i) => !checked.includes(i.key)) ? (
         <>
           <Text style={styles.h2}>Frische-Einkauf zur Wochenmitte</Text>
@@ -305,6 +404,22 @@ export function ShoppingListScreen({
               </Pressable>
             ))}
           </View>
+        </View>
+      ) : null}
+
+      {recurring.length ? (
+        <View style={[styles.card, { gap: 6 }]}>
+          <Text style={styles.sectionTitle}>Kommt regelmäßig</Text>
+          {[...recurring].sort((x, y) => x.next.localeCompare(y.next)).map((r) => (
+            <View key={r.id} style={local.orderRow}>
+              <Text style={[styles.hint, { flex: 1, color: colors.text }]}>
+                {r.amount ? `${r.amount} ` : ''}{r.name} <Text style={styles.hint}>· alle {r.everyDays} Tage · nächstes Mal {new Date(r.next).toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' })}</Text>
+              </Text>
+              <Pressable onPress={() => onRecurring(r.name, undefined, 0)} accessibilityLabel={`${r.name} nicht mehr wiederholen`} style={(st) => [local.iconBtn, hov(st) && local.iconHover]}>
+                <Icon name="x" size={14} color={colors.muted} />
+              </Pressable>
+            </View>
+          ))}
         </View>
       ) : null}
 
@@ -353,6 +468,11 @@ const local = StyleSheet.create({
   input: { minHeight: 38, paddingVertical: 6, fontSize: 14 },
   editBtns: { flexDirection: 'row', gap: 6 },
   editBtn: { flex: 1, height: 36, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
+  orderRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  repeatRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
+  repeatChip: { paddingHorizontal: 7, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: colors.border },
+  repeatOn: { backgroundColor: colors.accent, borderColor: colors.accent },
+  repeatText: { fontSize: 12, color: colors.text, fontWeight: '600' },
   addRow: { flexDirection: 'row', gap: space.sm },
   addBtn: { width: 44, height: 44, borderRadius: 12, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
 });

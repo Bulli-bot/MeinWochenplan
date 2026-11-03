@@ -20,9 +20,16 @@ Läuft im Browser am PC und auf dem iPhone als Symbol auf dem Home-Bildschirm. I
 - **Einkauf:** Abhaken, Preis je Artikel, „hab ich" schiebt in den Vorrat, eigene Artikel dazuschreiben.
   Grundzutaten (Einstellungen) fehlen auf der Liste; bei „2x einkaufen" kommt Frisches ab Donnerstag in einen zweiten Einkauf.
   „An Bring! senden" überträgt die offene Liste in die eigene Bring!-Liste (Angebote/Prospekte dann in Bring!).
+- **Preis-Vergleich & Pfand:** Kacheln zeigen den letzten Bon-Preis inkl. Pfand (Pfandzeile direkt darunter auf dem
+  Bon) und „bei X 0,30 € günstiger“, wenn ein anderer Laden billiger war. „Nach Laden aufteilen“ gruppiert die Liste
+  nach dem günstigsten Laden; die Reihenfolge der Bereiche lässt sich anpassen. Eigene Artikel können „alle 1/2/4
+  Wochen“ von selbst wiederkommen.
+- **Reste:** Lebensmittel im Vorrat mit „hält noch …“ → Karte „Reste verwerten“ auf der Übersicht, neue Pläne
+  bevorzugen passende Gerichte.
 - **Ausgaben:** Bon fotografieren (auch am iPhone) → „Auslesen" (am PC lokal, unterwegs per Gemini) → Positionen werden in
   Wochenplan / Grundbedarf / Nicht im Plan / Verzichtbar / Pfand sortiert (antippen zum Ändern),
-  Preise lassen sich mit einem Knopf für die Rezepte übernehmen. Wochenübersicht mit Budget-Ampel.
+  Preise lassen sich mit einem Knopf für die Rezepte übernehmen. Wochenübersicht mit Budget-Ampel, Monatsvergleich
+  mit Trend bei „verzichtbar“ und den teuersten Artikeln.
 - **Mehr:** Vorrat, Preise (eigene Preise überschreiben die Liste), Konto und Abgleich, Einstellungen
   (inkl. Kindernamen), Sicherung als Datei.
 
@@ -47,6 +54,14 @@ Abgleich automatisch pro Haushalt (Start, Rückkehr in die App, jede Minute, kur
 - Die Bring!-Zugangsdaten liegen nur auf dem Server; die App sieht sie nie. Prospekte/Angebote bleiben in
   Bring! (Anbieter Offerista) und werden bewusst **nicht** abgegriffen.
 - Hinweis: inoffizielle Schnittstelle – kann sich ändern, wenn Bring! sie umbaut.
+
+## Kalender-Abo (Erinnerungen aufs iPhone)
+- Einstellungen → Einkaufstage + Uhrzeit wählen → „Kalender-Link holen“ → „Im Kalender abonnieren“.
+- Termine: Einkaufstag mit offenem Betrag (Erinnerung am Vorabend 19 Uhr und 1 Std. vorher), „Bald leer“ aus dem
+  Vorrat, „Aufbrauchen“ für Reste mit Haltbarkeit, regelmäßige Artikel.
+- Die App schreibt einen Auszug (`calendar`) in den Zustand; die Edge Function `supabase/functions/kalender` liefert
+  daraus iCal. Schema: `supabase-kalender.sql`. Bei der Funktion „Verify JWT“ ausschalten (Kalender schickt keinen
+  Anmelde-Header) – geschützt über den geheimen Schlüssel im Link.
 
 ## Preise
 `src/data/prices.ts`: Preis pro Zutat (€/kg, €/l, €/Stück, €/EL, €/TL). Reihenfolge: eigener Preis in der
