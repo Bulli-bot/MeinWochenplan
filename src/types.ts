@@ -118,6 +118,14 @@ export interface AppState {
   shopHidden?: string[];
   /** Selbst geänderte Mengen der Plan-Artikel, z. B. „2 Packungen“ */
   shopAmounts?: Record<string, string>;
+  /** Selbst eingetragene Preise je Stück/Packung für die Einkaufsliste, Schlüssel = Name klein */
+  shopPrices?: Record<string, ShopPrice>;
+}
+
+export interface ShopPrice {
+  price: number;
+  /** ISO-Datum der Eingabe */
+  date: string;
 }
 
 export interface ShopExtra {

@@ -420,6 +420,13 @@ export default function App() {
         onEditExtra={(id, name, amount) => setState((prev) => ({ ...prev, shopExtras: prev.shopExtras.map((x) => (x.id === id ? { ...x, name, amount: amount || undefined } : x)) }))}
         hidden={state.shopHidden ?? []}
         amounts={state.shopAmounts ?? {}}
+        purchases={state.purchases}
+        prices={state.shopPrices ?? {}}
+        onPrice={(name, price) => setState((prev) => {
+          const key = name.trim().toLowerCase();
+          const { [key]: _, ...rest } = prev.shopPrices ?? {};
+          return { ...prev, shopPrices: price !== undefined ? { ...rest, [key]: { price, date: new Date().toISOString() } } : rest };
+        })}
         onHide={(key, hide) => setState((prev) => ({ ...prev, shopHidden: hide ? [...(prev.shopHidden ?? []), key] : (prev.shopHidden ?? []).filter((k) => k !== key) }))}
         onAmount={(key, text) => setState((prev) => {
           const { [key]: _, ...rest } = prev.shopAmounts ?? {};

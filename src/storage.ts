@@ -45,6 +45,7 @@ export const EMPTY_STATE: AppState = {
   shopExtras: [],
   shopHidden: [],
   shopAmounts: {},
+  shopPrices: {},
 };
 
 export async function loadState(): Promise<AppState> {

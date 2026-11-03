@@ -3,8 +3,9 @@ import { Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, Vi
 import { ingredientCost } from '../data/prices';
 import { sendToBring } from '../bring';
 import { applyPantry } from '../logic/pantry';
+import { itemPrice, lastBonPrice, shopPriceKey } from '../logic/shopPrice';
 import { CATEGORY_ORDER, buildShoppingList, formatAmount, isBasic, shoppingListAsText, shoppingTrip, type ShoppingItem } from '../logic/shoppingList';
-import type { MealPlan, PantryItem, Settings, ShopExtra } from '../types';
+import type { MealPlan, PantryItem, Purchase, Settings, ShopExtra, ShopPrice } from '../types';
 import { Button, Grid, Icon, colors, euro, hov, space, styles, useLayout } from '../ui';
 
 const itemCost = (it: ShoppingItem) => ingredientCost({ name: it.name, amount: it.amount, unit: it.unit, category: it.category }) ?? 0;
@@ -17,6 +18,10 @@ interface Tile {
   sub: string;
   done: boolean;
   extra?: ShopExtra;
+  /** Eigener Preis je Stück/Packung (zum Bearbeiten) */
+  ownPrice?: number;
+  /** Vorschlag im Preisfeld, z. B. vom letzten Bon */
+  priceHint?: string;
 }
 
 function TileView({ tile, editing, onToggle, onEdit, onDelete, onSave, onHave, onCancel }: {
@@ -25,23 +30,27 @@ function TileView({ tile, editing, onToggle, onEdit, onDelete, onSave, onHave, o
   onToggle: () => void;
   onEdit: () => void;
   onDelete: () => void;
-  onSave: (name: string, amount: string) => void;
+  onSave: (name: string, amount: string, price: string) => void;
   /** Nur Plan-Zutaten: „hab ich noch“ → Vorrat */
   onHave?: () => void;
   onCancel: () => void;
 }) {
   const [name, setName] = useState(tile.name);
   const [amount, setAmount] = useState(tile.amount);
+  const [price, setPrice] = useState(tile.ownPrice !== undefined ? tile.ownPrice.toFixed(2).replace('.', ',') : '');
+  const save = () => onSave(name, amount, price);
   if (editing) {
     return (
       <View style={[local.tile, local.tileEdit]}>
         {tile.extra ? (
           <TextInput value={name} onChangeText={setName} placeholder="Artikel" placeholderTextColor={colors.muted} style={[styles.input, local.input]} autoFocus />
         ) : <Text style={local.name} numberOfLines={2}>{tile.name}</Text>}
-        <TextInput value={amount} onChangeText={setAmount} placeholder="Menge, z. B. 2 Packungen" placeholderTextColor={colors.muted}
-          style={[styles.input, local.input]} autoFocus={!tile.extra} onSubmitEditing={() => onSave(name, amount)} />
+        <TextInput value={amount} onChangeText={setAmount} placeholder="Menge, z. B. 2" placeholderTextColor={colors.muted}
+          style={[styles.input, local.input]} autoFocus={!tile.extra} onSubmitEditing={save} />
+        <TextInput value={price} onChangeText={setPrice} placeholder={tile.priceHint ?? 'Preis je Stück/Packung in €'} placeholderTextColor={colors.muted}
+          keyboardType="decimal-pad" style={[styles.input, local.input]} onSubmitEditing={save} accessibilityLabel="Preis je Stück oder Packung" />
         <View style={local.editBtns}>
-          <Pressable onPress={() => onSave(name, amount)} accessibilityRole="button" accessibilityLabel="Speichern" style={[local.editBtn, { backgroundColor: colors.accent }]}>
+          <Pressable onPress={save} accessibilityRole="button" accessibilityLabel="Speichern" style={[local.editBtn, { backgroundColor: colors.accent }]}>
             <Icon name="check" size={16} color={colors.onAccent} />
           </Pressable>
           <Pressable onPress={onCancel} accessibilityRole="button" accessibilityLabel="Abbrechen" style={local.editBtn}>
@@ -70,14 +79,14 @@ function TileView({ tile, editing, onToggle, onEdit, onDelete, onSave, onHave, o
       </View>
       <Text style={[local.name, tile.done && local.nameDone]} numberOfLines={2}>{tile.name}</Text>
       <Text style={local.amount} numberOfLines={1}>{tile.amount || ' '}</Text>
-      <Text style={styles.hint} numberOfLines={1}>{tile.sub}</Text>
+      <Text style={styles.hint} numberOfLines={2}>{tile.sub}</Text>
     </Pressable>
   );
 }
 
 export function ShoppingListScreen({
-  plan, settings, checked, pantry, extras, hidden, amounts,
-  onToggle, onReset, onHave, onShopped, onAddExtra, onToggleExtra, onRemoveExtra, onEditExtra, onHide, onAmount,
+  plan, settings, checked, pantry, extras, hidden, amounts, purchases, prices,
+  onPrice, onToggle, onReset, onHave, onShopped, onAddExtra, onToggleExtra, onRemoveExtra, onEditExtra, onHide, onAmount,
 }: {
   plan: MealPlan;
   settings: Settings;
@@ -88,6 +97,12 @@ export function ShoppingListScreen({
   hidden: string[];
   /** Geänderte Mengen der Plan-Artikel */
   amounts: Record<string, string>;
+  /** Bons – für den zuletzt bezahlten Preis */
+  purchases: Purchase[];
+  /** Selbst eingetragene Preise je Stück/Packung */
+  prices: Record<string, ShopPrice>;
+  /** Preis merken (undefined = eigenen Preis löschen) */
+  onPrice: (name: string, price: number | undefined) => void;
   onToggle: (key: string) => void;
   onReset: () => void;
   /** „Hab ich noch" → in den Vorrat */
@@ -114,19 +129,43 @@ export function ShoppingListScreen({
   const [bringBusy, setBringBusy] = useState(false);
   const done = items.filter((i) => checked.includes(i.key)).length + extras.filter((x) => x.done).length;
   const total = items.length + extras.length;
-  const openCost = items.filter((i) => !checked.includes(i.key)).reduce((s, i) => s + itemCost(i), 0);
+  // Plan-Zutaten: eigener Preis, sonst Schätzung; eigene Artikel: eigener Preis, sonst letzter Bon
+  const planPrice = (it: ShoppingItem) => itemPrice(it.name, amounts[it.key], prices, []);
+  const planCost = (it: ShoppingItem) => planPrice(it)?.total ?? itemCost(it);
+  const extraPrice = (x: ShopExtra) => itemPrice(x.name, x.amount, prices, purchases);
+  const openExtras = extras.filter((x) => !x.done);
+  const unpriced = openExtras.filter((x) => !extraPrice(x)).length;
+  const openCost = items.filter((i) => !checked.includes(i.key)).reduce((s, i) => s + planCost(i), 0)
+    + openExtras.reduce((s, x) => s + (extraPrice(x)?.total ?? 0), 0);
   const twoTrips = settings.shopRhythm === 'zweimal';
 
-  const planTile = (it: ShoppingItem): Tile => ({
-    key: it.key,
-    name: it.name,
-    amount: amounts[it.key] ?? formatAmount(it.amount, it.unit),
-    sub: `ca. ${euro(itemCost(it))} · ${it.recipes.join(', ')}`,
-    done: checked.includes(it.key),
-  });
-  const extraTile = (x: ShopExtra): Tile => ({
-    key: x.id, name: x.name, amount: x.amount ?? '', sub: x.from === 'vorrat' ? 'Vorrat – bald leer' : 'eigener Artikel', done: !!x.done, extra: x,
-  });
+  const priceText = (p: NonNullable<ReturnType<typeof itemPrice>>) => {
+    const each = p.count !== 1 ? `${euro(p.total)} (${p.count.toLocaleString('de-DE')} × ${euro(p.each)})` : euro(p.total);
+    return p.source === 'eigen' ? `${each} · dein Preis` : `${each} · ${p.from}`;
+  };
+  const planTile = (it: ShoppingItem): Tile => {
+    const own = planPrice(it);
+    return {
+      key: it.key,
+      name: it.name,
+      amount: amounts[it.key] ?? formatAmount(it.amount, it.unit),
+      sub: own ? `${priceText(own)} · ${it.recipes.join(', ')}` : `ca. ${euro(itemCost(it))} · ${it.recipes.join(', ')}`,
+      done: checked.includes(it.key),
+      ownPrice: prices[shopPriceKey(it.name)]?.price,
+      priceHint: `Preis €, ca. ${euro(itemCost(it))}`,
+    };
+  };
+  const extraTile = (x: ShopExtra): Tile => {
+    const p = extraPrice(x);
+    const bon = lastBonPrice(x.name, purchases);
+    return {
+      key: x.id, name: x.name, amount: x.amount ?? '',
+      sub: p ? priceText(p) : x.from === 'vorrat' ? 'Vorrat – Preis? Stift antippen' : 'Preis? Stift antippen',
+      done: !!x.done, extra: x,
+      ownPrice: prices[shopPriceKey(x.name)]?.price,
+      priceHint: bon ? `Preis €, zuletzt ${euro(bon.price)}` : 'Preis € je Stück',
+    };
+  };
 
   const add = () => {
     const name = newItem.trim();
@@ -188,7 +227,11 @@ export function ShoppingListScreen({
       onEdit={() => setEditing(t.key)}
       onCancel={() => setEditing(null)}
       onDelete={() => { setEditing(null); if (t.extra) onRemoveExtra(t.extra.id); else onHide(t.key, true); }}
-      onSave={(name, amount) => {
+      onSave={(name, amount, price) => {
+        const value = parseFloat(price.replace(',', '.').replace(/[^0-9.]/g, ''));
+        const own = Number.isFinite(value) && value > 0 ? Math.round(value * 100) / 100 : undefined;
+        const finalName = t.extra ? name.trim() || t.name : t.name;
+        if (own !== t.ownPrice) onPrice(finalName, own);
         if (t.extra) onEditExtra(t.extra.id, name.trim() || t.name, amount.trim());
         else {
           // Unveränderte Menge nicht als eigene Angabe speichern
@@ -218,7 +261,7 @@ export function ShoppingListScreen({
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <View style={{ gap: 4 }}>
         <Text style={styles.h1}>Einkaufsliste</Text>
-        <Text style={styles.sub}>{done} von {total} im Wagen · offen ca. {euro(openCost)}</Text>
+        <Text style={styles.sub}>{done} von {total} im Wagen · offen ca. {euro(openCost)}{unpriced ? ` (${unpriced} ohne Preis)` : ''}</Text>
         <View style={local.progress}><View style={[local.progressFill, { width: `${total ? (done / total) * 100 : 0}%` }]} /></View>
       </View>
 
@@ -229,7 +272,7 @@ export function ShoppingListScreen({
           <Icon name="plus" size={20} color={colors.onAccent} />
         </Pressable>
       </View>
-      <Text style={styles.hint}>Kachel antippen = im Wagen. Stift = Menge ändern, Mülleimer = diese Woche nicht kaufen.</Text>
+      <Text style={styles.hint}>Kachel antippen = im Wagen. Stift = Menge und Preis ändern, Mülleimer = diese Woche nicht kaufen.</Text>
 
       {section('Eigene Artikel', extras.filter((x) => !x.done).map(extraTile))}
 
