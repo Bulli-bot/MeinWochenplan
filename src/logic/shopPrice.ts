@@ -157,3 +157,24 @@ export function cheaperElsewhere(name: string, purchases: Purchase[]): { store: 
   if (saving < 0.1 || saving / last.price < 0.05) return null;
   return { store: best.store, saving };
 }
+
+// ---------- Preistrend ----------
+
+/**
+ * Preisänderung eines Artikels: letzter Bon gegen den Bon davor (gleiches Wortmuster wie lastBonPrice).
+ * null, wenn es keine zwei Bons mit dem Artikel gibt oder der Preis gleich geblieben ist.
+ */
+export function priceTrend(name: string, purchases: Purchase[]): { now: number; before: number; diff: number; store: string } | null {
+  const ws = words(name);
+  if (!ws.length) return null;
+  const hits: { price: number; store: string; date: string }[] = [];
+  const sorted = [...purchases].filter((p) => p.status === 'fertig').sort((a, b) => b.date.localeCompare(a.date));
+  for (const p of sorted) {
+    const it = p.items.find((i) => i.price > 0 && i.category !== 'pfand' && ws.every((w) => norm(`${i.name} ${i.label ?? ''}`).includes(w)));
+    if (it) hits.push({ price: it.price, store: p.store, date: p.date });
+    if (hits.length === 2) break;
+  }
+  if (hits.length < 2) return null;
+  const diff = Math.round((hits[0].price - hits[1].price) * 100) / 100;
+  return diff ? { now: hits[0].price, before: hits[1].price, diff, store: hits[0].store } : null;
+}

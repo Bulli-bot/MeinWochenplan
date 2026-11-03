@@ -5,16 +5,19 @@ import { PRICE_DATE, PRICE_SOURCE } from '../data/prices';
 import { RECIPE_BY_ID } from '../data/recipes';
 import { portionCost } from '../logic/generator';
 import { formatAmount } from '../logic/shoppingList';
+import { fmtPeople } from '../logic/people';
 import type { KidVote, PhotoRef } from '../types';
 import { Button, colors, euro, styles } from '../ui';
 import { CookMode } from './CookMode';
 
 export function RecipeScreen({
-  recipeId, householdSize, isFavourite, isCooked, rating, photos, kids, votes, isCustom, wishes, onWish,
+  recipeId, householdSize, eatAt, isFavourite, isCooked, rating, photos, kids, votes, isCustom, wishes, onWish,
   onBack, onToggleFavourite, onToggleCooked, onRate, onAddPhoto, onDeletePhoto, onVote, onEdit, onDelete,
 }: {
   recipeId: string;
   householdSize: number;
+  /** Essenszeit für den Kochmodus (Tag im Plan oder Standard) */
+  eatAt?: string;
   isFavourite: boolean;
   isCooked: boolean;
   rating: number | undefined;
@@ -43,7 +46,7 @@ export function RecipeScreen({
 
   if (cooking) {
     return (
-      <CookMode recipe={r} people={householdSize} isCooked={isCooked} onClose={() => setCooking(false)}
+      <CookMode recipe={r} people={householdSize} eatAt={eatAt} isCooked={isCooked} onClose={() => setCooking(false)}
         onDone={(photo) => {
           setCooking(false);
           // Das Foto markiert das Gericht ohnehin als gekocht
@@ -68,7 +71,7 @@ export function RecipeScreen({
         <Text style={local.back}>‹ Zurück</Text>
       </Pressable>
       <Text style={styles.h1}>{r.name}</Text>
-      <Text style={styles.sub}>{r.minutes} Min. · {euro(portionCost(r, householdSize))} für {householdSize} {householdSize === 1 ? 'Person' : 'Personen'}</Text>
+      <Text style={styles.sub}>{r.minutes} Min. · {euro(portionCost(r, householdSize))} für {fmtPeople(householdSize)} {householdSize === 1 ? 'Person' : 'Personen'}</Text>
       <Text style={styles.hint}>
         Preise: {PRICE_SOURCE}, Stand {PRICE_DATE}
         {r.estimatedIngredients.length ? ` · geschätzt: ${r.estimatedIngredients.join(', ')}` : ' · alle Zutaten mit echtem Preis'}

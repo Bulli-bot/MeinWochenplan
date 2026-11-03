@@ -2,8 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { formatAmount } from '../logic/shoppingList';
 import type { Recipe } from '../types';
-import { Button, Icon, colors, radius, space, styles, useLayout } from '../ui';
+import { Button, Chip, Icon, colors, radius, space, styles, useLayout } from '../ui';
 import { useWakeLock } from './ShopMode';
+import { DEFAULT_MEAL_TIME, todayAt } from '../logic/mealtime';
+import { fmtPeople } from '../logic/people';
+import { gestureSupported, useGestures, useVoice, voiceSupported, type HandsFreeCommand } from '../handsfree';
 
 /** „20 Minuten“, „10–15 Min.“, „1 Stunde“ → Minuten (die größere Zahl bei Spannen) */
 export function stepMinutes(step: string): number | null {
@@ -75,13 +78,20 @@ function useTimers() {
     timers,
     start: (label: string, minutes: number) => setTimers((list) => [...list, { id: Date.now(), label, end: Date.now() + minutes * 60000 }]),
     stop: (id: number) => setTimers((list) => list.filter((t) => t.id !== id)),
+    /** Freihändig: den zuletzt fertigen, sonst den zuletzt gestarteten Timer beenden */
+    stopLatest: () => setTimers((list) => {
+      const t = [...list].reverse().find((x) => x.done) ?? list[list.length - 1];
+      return t ? list.filter((x) => x !== t) : list;
+    }),
   };
 }
 
 /** Kochmodus: Zeitplan ab der Essenszeit, Schritt für Schritt in großer Schrift, mehrere Timer, Bildschirm bleibt an. */
-export function CookMode({ recipe, people, isCooked, onDone, onClose }: {
+export function CookMode({ recipe, people, eatAt: planned = DEFAULT_MEAL_TIME, isCooked, onDone, onClose }: {
   recipe: Recipe;
   people: number;
+  /** Geplante Essenszeit „HH:MM“ (aus dem Plan bzw. den Einstellungen) */
+  eatAt?: string;
   isCooked: boolean;
   /** Am Ende: als gekocht markieren und Foto machen */
   onDone: (photo: boolean) => void;
@@ -91,10 +101,9 @@ export function CookMode({ recipe, people, isCooked, onDone, onClose }: {
   const { isWide, isTablet } = useLayout();
   const steps = recipe.steps;
   const totalMin = steps.reduce((s, x) => s + (stepMinutes(x) ?? DEFAULT_STEP), 0);
-  // Essenszeit: 18:30, oder – wenn das schon zu knapp ist – jetzt plus Kochzeit, auf 5 Minuten gerundet
+  // Geplante Essenszeit, oder – wenn das schon zu knapp ist – jetzt plus Kochzeit, auf 5 Minuten gerundet
   const [eatAt, setEatAt] = useState(() => {
-    const d = new Date();
-    d.setHours(18, 30, 0, 0);
+    const d = todayAt(planned);
     const earliest = Date.now() + totalMin * 60000;
     if (d.getTime() < earliest) return new Date(Math.ceil(earliest / 300000) * 300000);
     return d;
@@ -105,8 +114,29 @@ export function CookMode({ recipe, people, isCooked, onDone, onClose }: {
   const [idx, setIdx] = useState(-1);
   const last = idx === steps.length - 1;
   const minutes = idx >= 0 ? stepMinutes(steps[idx]) : null;
-  const { timers, start, stop } = useTimers();
+  const { timers, start, stop, stopLatest } = useTimers();
   const twoCol = isWide || isTablet;
+  // Freihändig: Sprache und/oder Gesten – mit nassen oder schmutzigen Händen
+  const [voiceOn, setVoiceOn] = useState(false);
+  const [gestOn, setGestOn] = useState(false);
+  const [heard, setHeard] = useState<string | null>(null);
+  const command = (c: HandsFreeCommand) => {
+    setHeard(c === 'weiter' ? 'Weiter' : c === 'zurueck' ? 'Zurück' : c === 'timer' ? 'Timer' : 'Timer stopp');
+    if (c === 'weiter') setIdx((i) => Math.min(steps.length - 1, i + 1));
+    else if (c === 'zurueck') setIdx((i) => Math.max(-1, i - 1));
+    else if (c === 'stopp') stopLatest();
+    else if (c === 'timer') {
+      const i = idxRef.current;
+      const m = i >= 0 ? stepMinutes(steps[i]) : null;
+      if (m) start(`Schritt ${i + 1}`, m);
+    }
+  };
+  const idxRef = useRef(idx);
+  idxRef.current = idx;
+  const voiceError = useVoice(voiceOn, command);
+  const gest = useGestures(gestOn, command);
+  const camRef = useRef<HTMLVideoElement | null>(null);
+  useEffect(() => { if (camRef.current && gest.stream) camRef.current.srcObject = gest.stream; }, [gest.stream]);
 
   const plan = (
     <View style={{ gap: 2 }}>
@@ -146,7 +176,7 @@ export function CookMode({ recipe, people, isCooked, onDone, onClose }: {
     <ScrollView style={{ flex: 1 }} contentContainerStyle={local.content}>
       {idx < 0 ? (
         <View style={{ gap: 10 }}>
-          <Text style={styles.sectionTitle}>Zutaten für {people}</Text>
+          <Text style={styles.sectionTitle}>Zutaten für {fmtPeople(people)} {people === 1 ? 'Person' : 'Personen'}</Text>
           {recipe.ingredients.map((ing, i) => (
             <Text key={`${ing.name}-${i}`} style={local.ingredient}>
               <Text style={{ color: colors.accent, fontWeight: '700' }}>{formatAmount(Math.round(ing.amount * people * 10) / 10, ing.unit)}</Text> {ing.name}
@@ -162,6 +192,21 @@ export function CookMode({ recipe, people, isCooked, onDone, onClose }: {
       )}
       {minutes ? <Button label={`Timer ${minutes} Min. starten`} variant="secondary" icon="clock" onPress={() => start(`Schritt ${idx + 1}`, minutes)} /> : null}
       {timerList}
+      {voiceSupported() || gestureSupported() ? (
+        <View style={{ gap: 6 }}>
+          <View style={styles.row}>
+            {voiceSupported() ? <Chip icon="mic" label="Sprache" selected={voiceOn} onPress={() => setVoiceOn(!voiceOn)} /> : null}
+            {gestureSupported() ? <Chip icon="video" label="Gesten" selected={gestOn} onPress={() => setGestOn(!gestOn)} /> : null}
+            {heard && (voiceOn || gestOn) ? <Text style={[styles.hint, { color: colors.accent }]}>erkannt: {heard}</Text> : null}
+          </View>
+          {voiceOn ? <Text style={styles.hint}>Sag „weiter“, „zurück“, „Timer“ oder „Timer stopp“.</Text> : null}
+          {gestOn ? <Text style={styles.hint}>Hand vor der Kamera nach rechts wischen = weiter, nach links = zurück, flache Hand vor die Kamera = Timer stopp. Das Bild bleibt auf dem Gerät.</Text> : null}
+          {gestOn && gest.stream ? (
+            <View style={local.cam}><video ref={camRef} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }} /></View>
+          ) : null}
+          {voiceError || gest.error ? <Text style={styles.error}>{voiceError ?? gest.error}</Text> : null}
+        </View>
+      ) : null}
       {awake ? <Text style={[styles.hint, { fontSize: 12 }]}>Bildschirm bleibt an</Text> : null}
     </ScrollView>
   );
@@ -220,6 +265,7 @@ const local = StyleSheet.create({
   ingredient: { fontSize: 20, lineHeight: 28, color: colors.text },
   timer: { flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.lg, borderRadius: radius.lg, borderWidth: 2, borderColor: colors.accent },
   timerText: { fontSize: 40, fontWeight: '800', color: colors.accent, fontVariant: ['tabular-nums'] },
+  cam: { width: 160, height: 120, borderRadius: radius.md, overflow: 'hidden', borderWidth: 1, borderColor: colors.borderStrong },
   timerStop: { minHeight: 44, paddingHorizontal: 18, borderRadius: radius.sm, backgroundColor: colors.accentSoft, justifyContent: 'center' },
   foot: { flexDirection: 'row', gap: space.sm, padding: space.lg, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.surface },
 });

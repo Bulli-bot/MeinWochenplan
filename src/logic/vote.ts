@@ -19,24 +19,29 @@ export function newVote(eligible: Recipe[], recent: string[]): FamilyVote {
   return { id: `v${Date.now().toString(36)}`, created: new Date().toISOString(), suggestions: voteSuggestions(eligible, recent), ballots: {} };
 }
 
-/** Punkte je Rezept: „will ich“ +1, „nein“ −1 */
+/** Ab so vielen Ja-Stimmen (inkl. Wunsch) ist es ein „Meal-Match“ */
+export const MATCH_AT = 3;
+
+/** Punkte je Rezept: Wunsch +1,5, „will ich“ +1, „nein“ −1 */
 export function voteScores(vote: FamilyVote | undefined): Record<string, number> {
   const out: Record<string, number> = {};
   if (!vote) return out;
   for (const ballot of Object.values(vote.ballots)) {
-    for (const [id, c] of Object.entries(ballot)) out[id] = (out[id] ?? 0) + c;
+    for (const [id, c] of Object.entries(ballot)) out[id] = (out[id] ?? 0) + (c === 2 ? 1.5 : c);
   }
   return out;
 }
 
 /** Stimmen eines Rezepts zählen */
-export function tally(vote: FamilyVote, id: string): { yes: number; no: number } {
+export function tally(vote: FamilyVote, id: string): { yes: number; no: number; wish: number } {
   let yes = 0;
   let no = 0;
+  let wish = 0;
   for (const b of Object.values(vote.ballots)) {
     const c: VoteChoice | undefined = b[id];
-    if (c === 1) yes += 1;
+    if (c === 1 || c === 2) yes += 1;
+    if (c === 2) wish += 1;
     if (c === -1) no += 1;
   }
-  return { yes, no };
+  return { yes, no, wish };
 }

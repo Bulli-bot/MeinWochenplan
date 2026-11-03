@@ -6,6 +6,7 @@ import { mergeGrundausstattung, missingGrundausstattung } from '../data/grundaus
 import { daysToUseBy, useByIn } from '../logic/leftovers';
 import { fridgeFromPhoto, type FridgeItem } from '../logic/vision';
 import { pickPhoto } from '../photos';
+import { ZeroWasteBoard } from './ZeroWaste';
 import { currentAmount, dueSoon, emptyOn } from '../logic/pantry';
 import type { PantryItem, PantryKind, Recipe } from '../types';
 import { Button, Card, Chip, Icon, Stepper, colors, hov, space, styles } from '../ui';
@@ -189,6 +190,8 @@ export function PantryScreen({ pantry, onChange, onRemove, onBack, onToShopping,
       <Link label="‹ Mehr" onPress={onBack} />
       <Text style={styles.h1}>Vorrat</Text>
       <Text style={styles.sub}>Lebensmittel, Getränke, Drogerie und Haushalt. Mit Verbrauch rechnet die App mit und erinnert dich, bevor etwas leer ist.</Text>
+
+      <ZeroWasteBoard pantry={pantry} />
 
       <Card style={{ gap: space.sm }}>
         <View style={styles.row}><Icon name="camera" color={colors.accent} /><Text style={styles.sectionTitle}>Kühlschrank-Foto</Text></View>

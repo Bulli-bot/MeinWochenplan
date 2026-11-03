@@ -16,6 +16,14 @@ export function slotPeople(slot: Pick<PlanSlot, 'guests' | 'absent'>, householdS
   return Math.round(present.reduce((s, m) => s + m.portion, 0) * 100) / 100;
 }
 
+/** Kürzel für die Kreise im Plan: „Kind 1“ → K1, „Anna Beispiel“ → AB, „Sascha“ → SA */
+export function initials(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return '?';
+  const s = words.length > 1 ? words.map((w) => w[0]).join('') : words[0].slice(0, 2);
+  return s.slice(0, 2).toUpperCase();
+}
+
 /** 3.25 → „3¼“ */
 export function fmtPeople(n: number): string {
   const whole = Math.floor(n);

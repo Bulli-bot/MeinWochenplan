@@ -5,7 +5,9 @@ import { sendToBring } from '../bring';
 import { applyPantry } from '../logic/pantry';
 import { RECURRING_CHOICES, findRecurring } from '../logic/recurring';
 import { ShopMode, type ShopRow } from './ShopMode';
-import { cheaperElsewhere, itemPrice, lastBonPrice, preferredStore, shopPriceKey, storeKey } from '../logic/shopPrice';
+import { cheaperElsewhere, itemPrice, lastBonPrice, preferredStore, priceTrend, shopPriceKey, storeKey } from '../logic/shopPrice';
+import { BarcodeScan } from './BarcodeScan';
+import { PfandCard, TrendCard } from './ShopCards';
 import { CATEGORY_ORDER, buildShoppingList, formatAmount, isBasic, shoppingListAsText, shoppingTrip, type ShoppingItem } from '../logic/shoppingList';
 import type { Category, MealPlan, PantryItem, Purchase, RecurringItem, Settings, ShopExtra, ShopPrice } from '../types';
 import { Button, Chip, Grid, Icon, Split, autoColumns, colors, contentWidth, euro, hov, space, styles, useLayout } from '../ui';
@@ -111,7 +113,7 @@ function TileView({ tile, editing, onToggle, onEdit, onDelete, onSave, onHave, o
 
 export function ShoppingListScreen({
   plan, settings, checked, pantry, extras, hidden, amounts, purchases, prices, recurring, catOrder, split, shopMode, onShopMode,
-  onPrice, onRecurring, onCatOrder, onSplit, onToggle, onReset, onHave, onShopped, onAddExtra, onBuyAnyway, onToggleExtra, onRemoveExtra, onEditExtra, onHide, onAmount,
+  onPrice, onRecurring, onCatOrder, onSplit, onToggle, onReset, onHave, onShopped, onScanned, onAddExtra, onBuyAnyway, onToggleExtra, onRemoveExtra, onEditExtra, onHide, onAmount,
 }: {
   plan: MealPlan;
   settings: Settings;
@@ -146,6 +148,8 @@ export function ShoppingListScreen({
   onHave: (name: string) => void;
   /** Einkauf fertig → weiter zu Ausgaben (Bon fotografieren) */
   onShopped: () => void;
+  /** Leer-Scan: Artikel ist aufgebraucht → auf die Liste, aus dem Vorrat */
+  onScanned: (name: string) => void;
   onAddExtra: (name: string) => void;
   /** „Schon im Vorrat“ → doch kaufen (als eigener Artikel mit Menge) */
   onBuyAnyway: (name: string, amount: string) => void;
@@ -159,6 +163,7 @@ export function ShoppingListScreen({
   const { width, isWide } = useLayout();
   const columns = isPhone ? 2 : autoColumns(contentWidth(width) - (isWide ? 380 + space.xl : 0), 190, 6);
   const [pantryOpen, setPantryOpen] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const all = useMemo(() => buildShoppingList(plan, settings.householdSize), [plan, settings.householdSize]);
   const basics = all.filter((i) => isBasic(i.name, settings.basics));
   const { toBuy, fromPantry } = useMemo(() => applyPantry(all.filter((i) => !isBasic(i.name, settings.basics)), pantry), [all, pantry, settings.basics]);
@@ -192,7 +197,9 @@ export function ShoppingListScreen({
   };
   const tipFor = (name: string) => {
     const c = cheaperElsewhere(name, purchases);
-    return c ? `bei ${c.store} ${euro(c.saving)} günstiger` : undefined;
+    if (c) return `bei ${c.store} ${euro(c.saving)} günstiger`;
+    const t = priceTrend(name, purchases);
+    return t ? `${t.diff > 0 ? '▲ +' : '▼ '}${euro(Math.abs(t.diff))} seit dem Bon davor` : undefined;
   };
 
   const priceText = (p: NonNullable<ReturnType<typeof itemPrice>>) => {
@@ -459,6 +466,10 @@ export function ShoppingListScreen({
         </View>
       ) : null}
           {isWide ? startBtn : null}
+      <PfandCard openCost={openCost} />
+      <Button label="Leer-Scan: Packung aufgebraucht" variant="secondary" icon="maximize" onPress={() => setScanning(true)} />
+      {scanning ? <BarcodeScan onClose={() => setScanning(false)} onFound={(name) => { setScanning(false); onScanned(name); }} /> : null}
+      <TrendCard names={[...extras.filter((x) => !x.done).map((x) => x.name), ...items.filter((i) => !checked.includes(i.key)).map((i) => i.name)]} purchases={purchases} />
       {notice ? <Text style={styles.hint}>{notice}</Text> : null}
       <Button label={bringBusy ? 'Sende an Bring! …' : 'An Bring! senden'} variant="secondary" icon="shopping-bag" onPress={() => (bringBusy ? null : toBring())} />
       <Button label="Einkauf erledigt – Bon fotografieren" variant="secondary" icon="camera" onPress={onShopped} />

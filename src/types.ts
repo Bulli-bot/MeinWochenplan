@@ -71,6 +71,8 @@ export interface Settings {
   shopDays?: Weekday[];
   /** Uhrzeit des Einkaufs (volle Stunde), Standard 10 */
   shopHour?: number;
+  /** Übliche Essenszeit „HH:MM“, Standard 18:30 – der Kochmodus rechnet davon rückwärts */
+  mealTime?: string;
 }
 
 export type StoreLevel = 'discounter' | 'supermarkt' | 'mix';
@@ -86,16 +88,19 @@ export interface PlanSlot {
   guests?: number;
   /** Mitglieder, die an diesem Tag nicht mitessen */
   absent?: string[];
+  /** Eigene Essenszeit „HH:MM“ an diesem Tag, sonst Settings.mealTime */
+  eatAt?: string;
 }
 
-export type VoteChoice = 1 | 0 | -1;
+/** 2 = Wunschgericht (⭐), 1 = will ich, 0 = egal, −1 = nein */
+export type VoteChoice = 2 | 1 | 0 | -1;
 
 export interface FamilyVote {
   id: string;
   created: string;
   /** Rezept-IDs zur Auswahl */
   suggestions: string[];
-  /** Person → Rezept-ID → will ich (1) / egal (0) / nein (−1) */
+  /** Person → Rezept-ID → Wunsch (2) / will ich (1) / egal (0) / nein (−1) */
   ballots: Record<string, Record<string, VoteChoice>>;
 }
 

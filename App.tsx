@@ -12,6 +12,9 @@ import { buildCalendarFeed, sameFeed } from './src/logic/calendar';
 import { applyRecurring, setRecurring } from './src/logic/recurring';
 import { applyAutoList, applyReceipt, consumeCooked } from './src/logic/automations';
 import { setMembers, slotPeople } from './src/logic/people';
+import { mealTime, slotEatAt } from './src/logic/mealtime';
+import { LiveShopPanel } from './src/screens/ShopCards';
+import { openShopping } from './src/logic/shopPrice';
 import { newVote, voteScores } from './src/logic/vote';
 import { cookableNow } from './src/logic/vision';
 import { VoteScreen } from './src/screens/VoteScreen';
@@ -34,7 +37,7 @@ import { ShoppingListScreen, capitalize } from './src/screens/ShoppingListScreen
 import { Snackbar, type UndoToast } from './src/snackbar';
 import { DEFAULT_SETTINGS, EMPTY_STATE, loadState, saveState } from './src/storage';
 import type { AppState, CustomRecipe, MealPlan, Settings } from './src/types';
-import { Button, Icon, colors, euro, hov, space, styles, useLayout, type IconName } from './src/ui';
+import { Button, Icon, colors, euro, hov, maxBodyWidth, space, styles, useLayout, type IconName } from './src/ui';
 
 type Tab = 'start' | 'plan' | 'rezepte' | 'einkauf' | 'ausgaben' | 'ki' | 'mehr';
 const TABS: [Tab, string, IconName][] = [
@@ -252,6 +255,21 @@ export default function App() {
     ));
   };
 
+  /** Leer-Scan: Artikel ist aufgebraucht → auf die Liste und (falls passend) aus dem Vorrat */
+  const scannedEmpty = (name: string) => {
+    const low = name.toLowerCase();
+    const gone = state.pantry.filter((p) => p.name.trim().length >= 3 && low.includes(p.name.trim().toLowerCase()));
+    addExtra(name, 'vorrat');
+    if (gone.length) setState((prev) => ({ ...prev, pantry: prev.pantry.filter((p) => !gone.includes(p)) }));
+    showToast({ text: `${capitalize(name)} kommt auf die Liste${gone.length ? ` · aus dem Vorrat: ${gone.map((g) => g.name).join(', ')}` : ''}`,
+      undo: () => setState((prev) => ({
+        ...prev,
+        shopExtras: prev.shopExtras.filter((x) => !(x.from === 'vorrat' && !x.done && x.name.toLowerCase() === capitalize(name).toLowerCase())),
+        pantry: [...prev.pantry, ...gone.filter((g) => !prev.pantry.some((p) => p.name === g.name))],
+      })),
+    });
+  };
+
   const swapDay = (day: number) => {
     if (!state.plan || !state.settings) return false;
     const replacement = findSwap(state.plan, day, context(state.settings), swapSeen.current[day]);
@@ -388,10 +406,14 @@ export default function App() {
     );
   } else if (openRecipe) {
     const id = openRecipe;
+    // Steht das Gericht im Plan (bevorzugt heute), gelten Personen und Essenszeit dieses Tages
+    const today = plan ? todayInPlan(plan) : null;
+    const recipeSlot = plan?.slots.find((s) => s.recipeId === id && !s.kind && s.day === today) ?? plan?.slots.find((s) => s.recipeId === id && !s.kind);
     body = (
       <RecipeScreen
         recipeId={id}
-        householdSize={settings.householdSize}
+        householdSize={recipeSlot ? slotPeople(recipeSlot, settings.householdSize) : settings.householdSize}
+        eatAt={slotEatAt(recipeSlot, settings)}
         isFavourite={state.favourites.includes(id)}
         isCooked={state.cooked.includes(id)}
         rating={state.ratings[id]}
@@ -503,7 +525,7 @@ export default function App() {
           if (!a || !b) return prev;
           // Gericht, Art (Reste/Restetag) und Personen wandern mit dem Tag
           // Wer an dem Tag da ist (absent), bleibt beim Tag
-          const move = (target: typeof a, src: typeof a) => ({ day: target.day, recipeId: src.recipeId, ...(src.kind ? { kind: src.kind } : {}), ...(src.guests ? { guests: src.guests } : {}), ...(target.absent ? { absent: target.absent } : {}) });
+          const move = (target: typeof a, src: typeof a) => ({ day: target.day, recipeId: src.recipeId, ...(src.kind ? { kind: src.kind } : {}), ...(src.guests ? { guests: src.guests } : {}), ...(target.absent ? { absent: target.absent } : {}), ...(target.eatAt ? { eatAt: target.eatAt } : {}) });
           return { ...prev, plan: { ...prev.plan, slots: prev.plan.slots.map((x) => (x.day === from ? move(a, b) : x.day === to ? move(b, a) : x)) } };
         })}
         onAbsent={(day, name) => setState((prev) => prev.plan ? {
@@ -513,6 +535,16 @@ export default function App() {
             const absent = x.absent?.includes(name) ? x.absent.filter((n) => n !== name) : [...(x.absent ?? []), name];
             const { absent: _, ...rest } = x;
             return absent.length ? { ...rest, absent } : rest;
+          }) },
+        } : prev)}
+        mealTime={mealTime(settings)}
+        shopPanel={layout.isUltra && isActiveShown ? <LiveShopPanel {...openShopping(state, plan, settings)} onGo={() => setTab('einkauf')} /> : undefined}
+        onEatAt={(day, time) => setState((prev) => prev.plan ? {
+          ...prev,
+          plan: { ...prev.plan, slots: prev.plan.slots.map((x) => {
+            if (x.day !== day) return x;
+            const { eatAt: _, ...rest } = x;
+            return time && time !== mealTime(prev.settings) ? { ...rest, eatAt: time } : rest;
           }) },
         } : prev)}
         onGuests={(day, guests) => setState((prev) => prev.plan ? {
@@ -586,6 +618,7 @@ export default function App() {
         onReset={() => setState((prev) => ({ ...prev, checkedItems: [], shopExtras: prev.shopExtras.map((x) => ({ ...x, done: false })) }))}
         onHave={(name) => setState((prev) => ({ ...prev, pantry: [...prev.pantry.filter((p) => p.name !== name), { name }] }))}
         onShopped={() => setTab('ausgaben')}
+        onScanned={scannedEmpty}
       />
     );
   } else if (tab === 'ausgaben') {
@@ -706,7 +739,7 @@ export default function App() {
             </Pressable>
           </View>
         ) : null}
-        <View style={local.main}><View style={[local.body, layout.isDesktop && { maxWidth: layout.width >= 1600 ? 1680 : 1240 }]}>{body}</View></View>
+        <View style={local.main}><View style={[local.body, layout.isDesktop && { maxWidth: maxBodyWidth(layout.width) }]}>{body}</View></View>
       </View>
       {showNav && !layout.isDesktop && !(shopMode && tab === 'einkauf') ? (
         <View style={local.tabBar}>

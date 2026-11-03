@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { ScrollView, Text } from 'react-native';
 import { Pressable, View } from 'react-native';
 import { defaultMembers } from '../logic/people';
+import { DEFAULT_MEAL_TIME, shiftTime } from '../logic/mealtime';
 import type { Member } from '../types';
 import type { Allergen, Basic, Carb, Diet, Equipment, Protein, Settings, StoreLevel, Vibe, Weekday } from '../types';
 import { Field } from '../components';
@@ -107,6 +108,18 @@ export function SettingsScreen({ initial, isFirstRun, onSave, onSaveOnly, error,
           )}
         </View>
       </View>
+
+      <Section title="Normalerweise essen wir um" hint="Davon rechnet der Kochmodus rückwärts, wann es losgeht. Einzelne Tage änderst du direkt im Plan.">
+        <View style={styles.row}>
+          <Pressable onPress={() => set({ mealTime: shiftTime(s.mealTime ?? DEFAULT_MEAL_TIME, -15) })} style={styles.stepBtn} accessibilityLabel="15 Minuten früher" accessibilityRole="button">
+            <Icon name="minus" color={colors.accent} />
+          </Pressable>
+          <Text style={styles.stepValue}>{s.mealTime ?? DEFAULT_MEAL_TIME} Uhr</Text>
+          <Pressable onPress={() => set({ mealTime: shiftTime(s.mealTime ?? DEFAULT_MEAL_TIME, 15) })} style={styles.stepBtn} accessibilityLabel="15 Minuten später" accessibilityRole="button">
+            <Icon name="plus" color={colors.accent} />
+          </Pressable>
+        </View>
+      </Section>
 
       <Section title="Wochenbudget" hint="Für alle Hauptgerichte zusammen.">
         <Stepper value={s.weeklyBudget} step={5} min={10} max={250} label={euro(s.weeklyBudget)} onChange={(v) => set({ weeklyBudget: v })} />

@@ -51,11 +51,14 @@ export function useLayout() {
   const isTablet = width >= 700 && !isDesktop;
   /** Breiter Bildschirm: Hauptspalte + Seitenspalte */
   const isWide = width >= 1280;
-  return { width, isDesktop, isTablet, isWide, isPhone: width < 700, columns: isDesktop ? 4 : isTablet ? 2 : 1 };
+  /** Ultrawide: zusätzliche Spalte zwischen Haupt- und Seitenspalte */
+  const isUltra = width >= 1920;
+  return { width, isDesktop, isTablet, isWide, isUltra, isPhone: width < 700, columns: isDesktop ? 4 : isTablet ? 2 : 1 };
 }
 
 /** Breite der Inhaltsfläche (ohne Seitenleiste) – wie in App.tsx begrenzt */
-export const contentWidth = (width: number) => Math.min(width >= 1024 ? width - 232 : width, width >= 1600 ? 1680 : 1240) - 2 * space.xl;
+export const maxBodyWidth = (width: number) => (width >= 1920 ? 2400 : width >= 1600 ? 1680 : 1240);
+export const contentWidth = (width: number) => Math.min(width >= 1024 ? width - 232 : width, maxBodyWidth(width)) - 2 * space.xl;
 
 /** Spaltenzahl aus der verfügbaren Breite (Mindestbreite je Spalte) statt fester Werte */
 export const autoColumns = (available: number, min = 200, max = 6) => Math.max(1, Math.min(max, Math.floor(available / min)));
@@ -64,16 +67,22 @@ export const autoColumns = (available: number, min = 200, max = 6) => Math.max(1
  * Ab 1280 px: breite Hauptspalte + feste Seitenspalte, die beim Scrollen stehen bleibt.
  * Darunter einspaltig – erst die Seitenspalte (Zusammenfassung/Aktionen), wenn `sideFirst`, sonst danach.
  */
-export function Split({ main, side, sideWidth = 380, sideFirst }: { main: ReactNode; side: ReactNode; sideWidth?: number; sideFirst?: boolean }) {
-  const { isWide } = useLayout();
+export function Split({ main, side, sideWidth = 380, sideFirst, extra }: { main: ReactNode; side: ReactNode; sideWidth?: number; sideFirst?: boolean; extra?: ReactNode }) {
+  const { isWide, isUltra } = useLayout();
   if (!isWide) return <>{sideFirst ? side : null}{main}{sideFirst ? null : side}</>;
+  const sticky = { gap: space.lg, position: 'sticky' as 'relative', top: 0 };
   return (
     <View style={{ flexDirection: 'row', gap: space.xl, alignItems: 'flex-start' }}>
       <View style={{ flex: 1, minWidth: 0, gap: space.lg }}>{main}</View>
-      <View style={{ width: sideWidth, gap: space.lg, position: 'sticky' as 'relative', top: 0 }}>{side}</View>
+      {isUltra && extra ? <View style={[{ width: 380 }, sticky]}>{extra}</View> : null}
+      <View style={[{ width: sideWidth }, sticky]}>{side}</View>
     </View>
   );
 }
+
+/** Platz für die Hauptspalte neben Seitenspalte (und ggf. Zusatzspalte) */
+export const splitMainWidth = (width: number, sideWidth = 380, extra = false) =>
+  contentWidth(width) - (width >= 1280 ? sideWidth + space.xl : 0) - (extra && width >= 1920 ? 380 + space.xl : 0);
 
 /** Raster mit gleich breiten Spalten; bricht automatisch um. */
 export function Grid({ columns, gap = space.md, children }: { columns: number; gap?: number; children: ReactNode }) {
