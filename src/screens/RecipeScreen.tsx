@@ -7,9 +7,10 @@ import { portionCost } from '../logic/generator';
 import { formatAmount } from '../logic/shoppingList';
 import type { KidVote, PhotoRef } from '../types';
 import { Button, colors, euro, styles } from '../ui';
+import { CookMode } from './CookMode';
 
 export function RecipeScreen({
-  recipeId, householdSize, isFavourite, isCooked, rating, photos, kids, votes, isCustom,
+  recipeId, householdSize, isFavourite, isCooked, rating, photos, kids, votes, isCustom, wishes, onWish,
   onBack, onToggleFavourite, onToggleCooked, onRate, onAddPhoto, onDeletePhoto, onVote, onEdit, onDelete,
 }: {
   recipeId: string;
@@ -21,6 +22,9 @@ export function RecipeScreen({
   kids: string[];
   votes: Record<string, KidVote>;
   isCustom: boolean;
+  /** Wunschessen: Kind → Rezept-ID */
+  wishes: Record<string, string>;
+  onWish: (kid: string, on: boolean) => void;
   onBack: () => void;
   onToggleFavourite: () => void;
   onToggleCooked: () => void;
@@ -33,8 +37,21 @@ export function RecipeScreen({
 }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [cooking, setCooking] = useState(false);
   const r = RECIPE_BY_ID[recipeId];
   if (!r) return null;
+
+  if (cooking) {
+    return (
+      <CookMode recipe={r} people={householdSize} isCooked={isCooked} onClose={() => setCooking(false)}
+        onDone={(photo) => {
+          setCooking(false);
+          // Das Foto markiert das Gericht ohnehin als gekocht
+          if (photo) addPhoto();
+          else if (!isCooked) onToggleCooked();
+        }} />
+    );
+  }
 
   const addPhoto = async () => {
     setNotice(null);
@@ -60,6 +77,8 @@ export function RecipeScreen({
       {photos.length ? <BigPhoto id={photos[0].id} onDelete={() => onDeletePhoto(photos[0].id)} /> : null}
       {photos.length > 1 ? <Text style={styles.hint}>{photos.length} Fotos – ältere unten.</Text> : null}
 
+      <Button label="Kochen starten" icon="play" onPress={() => setCooking(true)} />
+
       <View style={local.row}>
         <Pressable onPress={addPhoto} style={[local.action, local.primary]} accessibilityRole="button">
           <Text style={local.primaryText}>📷 Foto vom Essen</Text>
@@ -76,7 +95,7 @@ export function RecipeScreen({
       {kids.length ? (
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Hat es den Kindern geschmeckt?</Text>
-          <Text style={styles.hint}>👍 kommt öfter, 👎 seltener. Mögen es alle nicht, fliegt es aus dem Plan.</Text>
+          <Text style={styles.hint}>👍 kommt öfter, 👎 seltener. Mögen es alle nicht, fliegt es aus dem Plan. ⭐ Wunsch = kommt in den nächsten Plan (ein Wunsch pro Kind).</Text>
           {kids.map((kid) => (
             <View key={kid} style={local.kidRow}>
               <Text style={local.kid}>{kid}</Text>
@@ -89,6 +108,10 @@ export function RecipeScreen({
                   </Pressable>
                 );
               })}
+              <Pressable onPress={() => onWish(kid, wishes[kid] !== r.id)} style={[local.thumb, wishes[kid] === r.id && local.thumbUp]}
+                accessibilityLabel={`${kid} wünscht sich das`} accessibilityState={{ selected: wishes[kid] === r.id }}>
+                <Text style={[local.thumbText, { fontSize: 14, color: wishes[kid] === r.id ? colors.accent : colors.muted }]}>⭐ Wunsch</Text>
+              </Pressable>
             </View>
           ))}
         </View>

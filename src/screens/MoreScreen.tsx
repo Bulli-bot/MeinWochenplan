@@ -4,7 +4,7 @@ import type { SyncStatus } from '../cloud';
 import { helperStatus } from '../pchelper';
 import { EMPTY_STATE } from '../storage';
 import type { AppState } from '../types';
-import { Button, Card, Icon, colors, hov, styles, type IconName } from '../ui';
+import { Button, Card, Grid, Icon, Split, autoColumns, colors, contentWidth, hov, space, styles, useLayout, type IconName } from '../ui';
 
 /** Sicherung als JSON-Datei herunterladen (ohne Fotos – die liegen in der Cloud). */
 function downloadBackup(state: AppState) {
@@ -50,6 +50,7 @@ export function MoreScreen({ state, syncStatus, onOpen, onRestore, onExpenses, o
   onOpen: (v: MoreView) => void;
   onRestore: (s: AppState) => void;
 }) {
+  const { width, isPhone, isWide } = useLayout();
   const [helper, setHelper] = useState<string>('wird geprüft …');
   const [msg, setMsg] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<AppState | null>(null);
@@ -73,6 +74,9 @@ export function MoreScreen({ state, syncStatus, onOpen, onRestore, onExpenses, o
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Text style={styles.h1}>Mehr</Text>
+      <Split
+        main={<>
+      {isPhone ? (
       <Card style={{ padding: 0, gap: 0 }}>
         {entries.map(([id, title, sub, icon], i) => (
           <Pressable key={id} onPress={() => (id === 'ausgaben' ? onExpenses?.() : id === 'ki' ? onAi?.() : onOpen(id))} accessibilityRole="button"
@@ -86,6 +90,19 @@ export function MoreScreen({ state, syncStatus, onOpen, onRestore, onExpenses, o
           </Pressable>
         ))}
       </Card>
+      ) : (
+        <Grid columns={autoColumns(contentWidth(width) - (isWide ? 380 + space.xl : 0), 260, 3)}>
+          {entries.map(([id, title, sub, icon]) => (
+            <Card key={id} onPress={() => (id === 'ausgaben' ? onExpenses?.() : id === 'ki' ? onAi?.() : onOpen(id))} style={local.tile}>
+              <View style={local.iconBox}><Icon name={icon} size={20} color={colors.accent} /></View>
+              <Text style={local.title}>{title}</Text>
+              <Text style={[styles.hint, id === 'konto' && syncStatus.kind === 'fehler' && { color: colors.danger }]} numberOfLines={2}>{sub}</Text>
+            </Card>
+          ))}
+        </Grid>
+      )}
+        </>}
+        side={<>
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>PC-Helfer</Text>
         <Text style={styles.hint}>{helper}</Text>
@@ -106,6 +123,8 @@ export function MoreScreen({ state, syncStatus, onOpen, onRestore, onExpenses, o
           {msg ? <Text style={styles.hint}>{msg}</Text> : null}
         </View>
       ) : null}
+        </>}
+      />
     </ScrollView>
   );
 }
@@ -114,5 +133,6 @@ const local = StyleSheet.create({
   entry: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, minHeight: 68, borderRadius: 16 },
   divider: { borderTopWidth: 1, borderTopColor: colors.border, borderRadius: 0 },
   iconBox: { width: 38, height: 38, borderRadius: 11, backgroundColor: colors.accentSoft, alignItems: 'center', justifyContent: 'center' },
+  tile: { minHeight: 140, gap: 8 },
   title: { fontSize: 16, fontWeight: '700', color: colors.text },
 });

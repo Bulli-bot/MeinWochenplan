@@ -5,6 +5,8 @@ import { RECIPE_BY_ID } from '../data/recipes';
 import { addDays, isoDay, isoWeek, mondayOf, planMonday, shortDate, slotDate, todayIndex, todayInPlan } from '../logic/dates';
 import { planCost, portionCost } from '../logic/generator';
 import type { MealPlan, PhotoRef } from '../types';
+import { seasonalIngredients } from '../data/season';
+import { weekBalance } from '../logic/balance';
 import { Button, Card, Chip, Eyebrow, Grid, Icon, Tag, WEEKDAYS, WEEKDAYS_LONG, colors, euro, hov, space, styles, useLayout } from '../ui';
 
 export { todayIndex };
@@ -124,7 +126,7 @@ function MonthView({ plans, startAt, onOpen }: { plans: MealPlan[]; startAt: Dat
 
 export function PlanScreen({
   plan, isActive, nav, allPlans, savedPlans, householdSize, budget, favourites, cooked, photos, kidInfo, error,
-  onOpen, onSwap, onChoose, onRegenerate, onPlanNext, onSaveWeek, onReuse, onUnsave, footer,
+  onOpen, onSwap, onChoose, onMove, onGuests, wishes, onRegenerate, onPlanNext, onSaveWeek, onReuse, onUnsave, footer,
 }: {
   /** Angezeigte Woche */
   plan: MealPlan;
@@ -143,6 +145,12 @@ export function PlanScreen({
   onOpen: (recipeId: string) => void;
   onSwap: (day: number) => void;
   onChoose: (day: number) => void;
+  /** Zwei Tage tauschen (Gericht wandert mit) */
+  onMove: (from: number, to: number) => void;
+  /** Personen an einem Tag (undefined = wie Haushalt) */
+  onGuests: (day: number, guests: number | undefined) => void;
+  /** Wunschessen der Kinder: Kind → Rezept-ID */
+  wishes: Record<string, string>;
   onRegenerate: () => void;
   /** Gesetzt, wenn schon die kommende Woche dran ist, aber noch kein Plan dafür existiert */
   onPlanNext?: { label: string; run: () => void };
@@ -151,8 +159,19 @@ export function PlanScreen({
   onUnsave: (p: MealPlan) => void;
   footer?: ReactNode;
 }) {
-  const { columns } = useLayout();
+  const { columns: baseColumns, width } = useLayout();
+  // Ab 1600 px alle 7 Tage nebeneinander
+  const columns = width >= 1600 ? 7 : baseColumns;
   const [mode, setMode] = useState<'woche' | 'monat'>('woche');
+  /** Tag, der gerade verschoben wird – der nächste angetippte Tag tauscht mit ihm */
+  const [moving, setMoving] = useState<number | null>(null);
+  /** Tag, bei dem die Personenzahl gerade geändert wird */
+  const [guestDay, setGuestDay] = useState<number | null>(null);
+  const tapDay = (day: number, open: () => void) => {
+    if (moving === null) return open();
+    if (moving !== day) onMove(moving, day);
+    setMoving(null);
+  };
   const [naming, setNaming] = useState<string | null>(null);
   const total = planCost(plan, householdSize, RECIPE_BY_ID);
   const today = todayInPlan(plan);
@@ -196,13 +215,40 @@ export function PlanScreen({
             </View>
           </Card>
 
+          {(() => {
+            const bal = weekBalance(plan, RECIPE_BY_ID);
+            const wishList = Object.entries(wishes).filter(([, id]) => RECIPE_BY_ID[id]);
+            if (!bal.parts.length && !wishList.length) return null;
+            return (
+              <Card style={{ gap: 6 }}>
+                <View style={styles.row}><Icon name="activity" color={colors.accent} /><Text style={styles.sectionTitle}>Ausgewogenheit</Text></View>
+                <Text style={styles.hint}>{bal.parts.join(' · ')}</Text>
+                {bal.hints.map((h) => <Text key={h} style={[styles.hint, { color: colors.warn }]}>{h}</Text>)}
+                {wishList.length ? (
+                  <Text style={styles.hint}>
+                    Wunschessen: {wishList.map(([kid, id]) => `${kid} → ${RECIPE_BY_ID[id].name}${plan.slots.some((s) => s.recipeId === id) ? ' ✓' : ''}`).join(' · ')}
+                  </Text>
+                ) : null}
+              </Card>
+            );
+          })()}
+
+          {moving !== null ? (
+            <Card style={{ borderColor: colors.accent, gap: space.sm }}>
+              <Text style={styles.sectionTitle}>{WEEKDAYS_LONG[moving]} verschieben</Text>
+              <Text style={styles.hint}>Tippe auf den Tag, mit dem getauscht werden soll.</Text>
+              <Pressable onPress={() => setMoving(null)}><Text style={[styles.hint, { color: colors.accent }]}>Abbrechen</Text></Pressable>
+            </Card>
+          ) : null}
+
           <Grid columns={columns}>
             {plan.slots.map((slot) => {
               const isToday = slot.day === today;
               const dateText = isToday ? 'heute' : shortDate(slotDate(plan, slot.day));
               if (slot.kind === 'restetag') {
                 return (
-                  <Card key={slot.day} accent={isToday} style={[local.day, local.dashed]}>
+                  <Card key={slot.day} accent={isToday || moving === slot.day} onPress={moving !== null ? () => tapDay(slot.day, () => {}) : undefined}
+                    style={[local.day, local.dashed, moving !== null && moving !== slot.day && local.target]}>
                     <View style={local.dayHead}>
                       <Eyebrow color={isToday ? colors.accent : colors.muted}>{WEEKDAYS_LONG[slot.day]}</Eyebrow>
                       <Text style={styles.hint}>{dateText}</Text>
@@ -218,13 +264,19 @@ export function PlanScreen({
               const kids = kidInfo(r.id);
               const isCooked = cooked.includes(r.id);
               const isReste = slot.kind === 'reste';
+              const source = isReste ? plan.slots.find((x) => x.recipeId === r.id && !x.kind) : undefined;
+              const people = slot.guests ?? householdSize;
+              // Gekochte Tage (außer heute) kompakt und blasser – die kommenden stechen hervor
+              const compact = isCooked && !isToday;
               return (
-                <Card key={slot.day} accent={isToday} onPress={() => onOpen(r.id)} style={[local.day, isReste && local.dashed]}>
+                <Card key={slot.day} accent={isToday || moving === slot.day} onPress={() => tapDay(slot.day, () => onOpen(r.id))}
+                  style={[local.day, isReste && local.dashed, compact && moving === null && local.done, moving !== null && moving !== slot.day && local.target]}>
                   <View style={local.dayHead}>
                     <Eyebrow color={isToday ? colors.accent : colors.muted}>{WEEKDAYS_LONG[slot.day]}</Eyebrow>
                     <Text style={[styles.hint, isToday && { color: colors.accent }]}>{dateText}</Text>
                   </View>
-                  {!isReste && (columns > 1 || photos[r.id]?.[0]) ? <Cover id={photos[r.id]?.[0]?.id} height={columns > 1 ? 120 : 170} /> : null}
+                  {!isReste && !compact && (columns > 1 || photos[r.id]?.[0]) ? <Cover id={photos[r.id]?.[0]?.id} height={columns > 1 ? 120 : 170} /> : null}
+                  {isReste && source ? <Text style={[styles.hint, { color: colors.info }]}>← vom {WEEKDAYS_LONG[source.day]}, dort doppelt gekocht</Text> : null}
                   <Text style={local.name} numberOfLines={2}>{r.name}{favourites.includes(r.id) ? '  ♥' : ''}</Text>
                   <View style={styles.row}>
                     {isReste ? <Tag label="Reste vom Vortag" tone="info" icon="refresh-ccw" />
@@ -232,8 +284,26 @@ export function PlanScreen({
                     {!isReste ? <Tag label={euro(portionCost(r, householdSize) * (plan.slots.some((s) => s.kind === 'reste' && s.recipeId === r.id) ? 2 : 1))} icon="tag" /> : null}
                     {kids.up ? <Tag label={`${kids.up}`} tone="accent" icon="thumbs-up" /> : null}
                     {kids.down ? <Tag label={`${kids.down}`} tone="danger" icon="thumbs-down" /> : null}
+                    {!isReste && !compact && seasonalIngredients(r).length ? <Tag label="Saison" tone="accent" icon="sun" /> : null}
+                    {!isReste && isActive ? (
+                      <Pressable onPress={() => setGuestDay(guestDay === slot.day ? null : slot.day)} accessibilityRole="button" accessibilityLabel={`Personen am ${WEEKDAYS_LONG[slot.day]}: ${people}`}>
+                        <Tag label={`${people}`} tone={slot.guests ? 'warn' : 'muted'} icon="users" />
+                      </Pressable>
+                    ) : null}
                   </View>
-                  {isActive ? (
+                  {guestDay === slot.day ? (
+                    <View style={local.guestRow}>
+                      <Text style={[styles.hint, { flex: 1 }]}>Personen{slot.guests ? ' (mit Gästen)' : ''}</Text>
+                      <Pressable onPress={() => onGuests(slot.day, people - 1 === householdSize ? undefined : Math.max(1, people - 1))} style={local.stepBtn} accessibilityLabel="Eine Person weniger">
+                        <Icon name="minus" size={14} color={colors.text} />
+                      </Pressable>
+                      <Text style={[styles.sectionTitle, { minWidth: 20, textAlign: 'center' }]}>{people}</Text>
+                      <Pressable onPress={() => onGuests(slot.day, people + 1 === householdSize ? undefined : Math.min(20, people + 1))} style={local.stepBtn} accessibilityLabel="Eine Person mehr">
+                        <Icon name="plus" size={14} color={colors.text} />
+                      </Pressable>
+                    </View>
+                  ) : null}
+                  {isActive && moving === null && !compact ? (
                     <View style={local.actions}>
                       <Pressable onPress={() => onChoose(slot.day)} accessibilityRole="button" style={(st) => [local.action, hov(st) && local.actionHover]}>
                         <Icon name="list" size={15} color={colors.accent} />
@@ -242,9 +312,14 @@ export function PlanScreen({
                       {!isReste ? (
                         <Pressable onPress={() => onSwap(slot.day)} accessibilityRole="button" style={(st) => [local.action, hov(st) && local.actionHover]}>
                           <Icon name="shuffle" size={15} color={colors.accent} />
-                          <Text style={styles.smallText}>Tauschen</Text>
+                          <Text style={styles.smallText}>Zufällig</Text>
                         </Pressable>
                       ) : null}
+                      <Pressable onPress={() => setMoving(slot.day)} accessibilityRole="button" accessibilityLabel={`${WEEKDAYS_LONG[slot.day]} mit anderem Tag tauschen`}
+                        style={(st) => [local.action, hov(st) && local.actionHover]}>
+                        <Icon name="move" size={15} color={colors.accent} />
+                        <Text style={styles.smallText}>Verschieben</Text>
+                      </Pressable>
                     </View>
                   ) : null}
                 </Card>
@@ -308,11 +383,15 @@ const local = StyleSheet.create({
   fill: { height: 8, borderRadius: 4 },
   day: { gap: space.sm },
   dashed: { borderStyle: 'dashed' },
+  done: { opacity: 0.6 },
+  target: { borderColor: colors.accent, borderStyle: 'dashed' },
+  guestRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  stepBtn: { width: 32, height: 32, borderRadius: 8, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
   restIcon: { height: 64, borderRadius: 12, backgroundColor: colors.accentSoft, alignItems: 'center', justifyContent: 'center' },
   dayHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   name: { fontSize: 17, fontWeight: '700', color: colors.text, minHeight: 22 },
-  actions: { flexDirection: 'row', gap: space.sm, marginTop: 4 },
-  action: { flex: 1, flexDirection: 'row', gap: 6, minHeight: 36, borderRadius: 10, backgroundColor: colors.accentSoft, alignItems: 'center', justifyContent: 'center' },
+  actions: { flexDirection: 'row', gap: space.sm, marginTop: 4, flexWrap: 'wrap' },
+  action: { flexGrow: 1, flexBasis: 96, paddingHorizontal: 8, flexDirection: 'row', gap: 6, minHeight: 36, borderRadius: 10, backgroundColor: colors.accentSoft, alignItems: 'center', justifyContent: 'center' },
   actionHover: { backgroundColor: '#25402F' },
   savedRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingVertical: 10, borderTopWidth: 1, borderTopColor: colors.border },
   savedName: { fontSize: 15, fontWeight: '700', color: colors.text },

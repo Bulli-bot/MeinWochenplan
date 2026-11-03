@@ -33,6 +33,15 @@ Läuft im Browser am PC und auf dem iPhone als Symbol auf dem Home-Bildschirm. I
 - **Mehr:** Vorrat, Preise (eigene Preise überschreiben die Liste), Konto und Abgleich, Einstellungen
   (inkl. Kindernamen), Sicherung als Datei.
 
+- **Kochen & Woche:** Kochmodus (Schritt für Schritt, Timer, Bildschirm bleibt an), Tage per „Verschieben“ tauschen,
+  Gäste pro Tag (Mengen, Liste, Preis passen sich an), Ausgewogenheit der Woche, Saison-Gemüse wird bevorzugt,
+  Wunschessen der Kinder (⭐ im Rezept) kommt in den nächsten Plan.
+- **Automatiken:** Gekocht → Zutaten im Vorrat abziehen; Bon ausgelesen → Liste abhaken, gezählten Vorrat auffüllen,
+  Preise übernehmen; Vorrat mit „automatisch auf die Liste“ landet bald leer von selbst auf der Einkaufsliste.
+  Alles mit „Rückgängig“.
+- **Breite Bildschirme:** ab 1280 px Hauptspalte + Seitenspalte (Einkauf, Ausgaben, Rezepte, KI, Mehr), ab 1600 px
+  die ganze Woche nebeneinander.
+
 ## Konten, Besitzer und Abgleich
 Anmeldung mit E-Mail und Passwort (Supabase Auth). Neue Konten sind gesperrt, bis der Besitzer sie unter
 Mehr → Konto freigibt; dort kann er Konten auch sperren oder „in meinen Haushalt" holen (gemeinsame Woche).

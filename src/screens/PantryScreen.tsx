@@ -50,6 +50,7 @@ function ItemForm({ initial, names, onSave, onCancel }: {
   const [use, setUse] = useState(initial?.perDay ? fmt(initial.perDay) : '');
   const [usePer, setUsePer] = useState<'tag' | 'woche'>('tag');
   const [remind, setRemind] = useState(initial?.remindDays ?? 1);
+  const [autoList, setAutoList] = useState(!!initial?.autoList);
   const keepNow = initial ? daysToUseBy(initial) : null;
   /** null = unverändert lassen (bestehendes Datum), Zahl = neu ab heute */
   const [keep, setKeep] = useState<number | null>(null);
@@ -66,7 +67,7 @@ function ItemForm({ initial, names, onSave, onCancel }: {
       name: clean,
       kind: kindTouched ? kind : guessKind(clean),
       ...(value !== undefined ? { amount: value, unit, since: new Date().toISOString() } : {}),
-      ...(perDay ? { perDay: Math.round(perDay * 1000) / 1000, remindDays: remind } : {}),
+      ...(perDay ? { perDay: Math.round(perDay * 1000) / 1000, remindDays: remind, ...(autoList ? { autoList: true } : {}) } : {}),
       ...(keep === null ? (initial?.useBy ? { useBy: initial.useBy } : {}) : keep > 0 ? { useBy: useByIn(keep) } : {}),
     }, perDay, remind);
     if (!initial) {
@@ -96,6 +97,7 @@ function ItemForm({ initial, names, onSave, onCancel }: {
             <View style={{ gap: 6 }}>
               <Text style={styles.hint}>Erinnern, wenn es nur noch so viele Tage reicht:</Text>
               <Stepper value={remind} min={0} max={7} label={remind === 0 ? 'wenn leer' : `${remind} ${remind === 1 ? 'Tag' : 'Tage'}`} onChange={setRemind} />
+              <Chip icon="shopping-cart" label="Dann automatisch auf die Liste" selected={autoList} onPress={() => setAutoList(!autoList)} />
             </View>
           ) : null}
         </>

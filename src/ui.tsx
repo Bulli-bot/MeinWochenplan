@@ -49,7 +49,30 @@ export function useLayout() {
   const { width } = useWindowDimensions();
   const isDesktop = width >= 1024;
   const isTablet = width >= 700 && !isDesktop;
-  return { width, isDesktop, isTablet, isPhone: width < 700, columns: isDesktop ? 4 : isTablet ? 2 : 1 };
+  /** Breiter Bildschirm: Hauptspalte + Seitenspalte */
+  const isWide = width >= 1280;
+  return { width, isDesktop, isTablet, isWide, isPhone: width < 700, columns: isDesktop ? 4 : isTablet ? 2 : 1 };
+}
+
+/** Breite der Inhaltsfläche (ohne Seitenleiste) – wie in App.tsx begrenzt */
+export const contentWidth = (width: number) => Math.min(width >= 1024 ? width - 232 : width, width >= 1600 ? 1680 : 1240) - 2 * space.xl;
+
+/** Spaltenzahl aus der verfügbaren Breite (Mindestbreite je Spalte) statt fester Werte */
+export const autoColumns = (available: number, min = 200, max = 6) => Math.max(1, Math.min(max, Math.floor(available / min)));
+
+/**
+ * Ab 1280 px: breite Hauptspalte + feste Seitenspalte, die beim Scrollen stehen bleibt.
+ * Darunter einspaltig – erst die Seitenspalte (Zusammenfassung/Aktionen), wenn `sideFirst`, sonst danach.
+ */
+export function Split({ main, side, sideWidth = 380, sideFirst }: { main: ReactNode; side: ReactNode; sideWidth?: number; sideFirst?: boolean }) {
+  const { isWide } = useLayout();
+  if (!isWide) return <>{sideFirst ? side : null}{main}{sideFirst ? null : side}</>;
+  return (
+    <View style={{ flexDirection: 'row', gap: space.xl, alignItems: 'flex-start' }}>
+      <View style={{ flex: 1, minWidth: 0, gap: space.lg }}>{main}</View>
+      <View style={{ width: sideWidth, gap: space.lg, position: 'sticky' as 'relative', top: 0 }}>{side}</View>
+    </View>
+  );
 }
 
 /** Raster mit gleich breiten Spalten; bricht automatisch um. */

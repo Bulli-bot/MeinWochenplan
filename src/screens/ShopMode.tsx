@@ -16,7 +16,7 @@ export interface ShopRow {
 }
 
 /** Bildschirm bleibt an, solange der Einkaufsmodus offen ist (Safari ab iOS 16.4, Chrome). */
-function useWakeLock(): boolean {
+export function useWakeLock(): boolean {
   const [awake, setAwake] = useState(false);
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof navigator === 'undefined' || !('wakeLock' in navigator)) return;

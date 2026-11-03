@@ -10,6 +10,7 @@ import { budgetWeekKey, isoWeek, parseDay, planWeekKey, targetWeekStart, todayIn
 import { findSwap, generatePlan, kidTally, planCost, type PlanContext } from './src/logic/generator';
 import { buildCalendarFeed, sameFeed } from './src/logic/calendar';
 import { applyRecurring, setRecurring } from './src/logic/recurring';
+import { applyAutoList, applyReceipt, consumeCooked } from './src/logic/automations';
 import { deletePhotoData, newPhotoId, pickPhoto, savePhotoData } from './src/photos';
 import { AccountScreen } from './src/screens/AccountScreen';
 import { AiScreen } from './src/screens/AiScreen';
@@ -129,8 +130,8 @@ export default function App() {
   const today = new Date().toDateString();
   // Regelmäßige Artikel, die fällig sind, auf die Liste
   useEffect(() => {
-    if (synced) setState((prev) => applyRecurring(prev));
-  }, [synced, state.recurring, today]);
+    if (synced) setState((prev) => applyAutoList(applyRecurring(prev)));
+  }, [synced, state.recurring, state.pantry, today]);
   // Auszug für das Kalender-Abo aktuell halten
   useEffect(() => {
     if (!synced) return;
@@ -159,6 +160,7 @@ export default function App() {
     recentRecipeIds: state.recentRecipeIds,
     kidVotes: state.kidVotes,
     pantry: state.pantry,
+    wishes: Object.values(state.kidWishes ?? {}),
   });
 
   /**
@@ -181,6 +183,8 @@ export default function App() {
         archive,
         // Der bisherige Plan wird zur "letzten Woche", damit sich Gerichte nicht sofort wiederholen.
         recentRecipeIds: [...(old?.slots.map((s) => s.recipeId).filter(Boolean) ?? []), ...prev.recentRecipeIds].slice(0, RECENT_LIMIT),
+        // Erfüllte Wunschessen sind erledigt
+        kidWishes: Object.fromEntries(Object.entries(prev.kidWishes ?? {}).filter(([, id]) => !next.slots.some((s) => s.recipeId === id))),
         checkedItems: [],
         cooked: [],
         shopExtras: prev.shopExtras.filter((x) => !x.done),
@@ -211,7 +215,7 @@ export default function App() {
       plan: {
         ...prev.plan,
         slots: prev.plan.slots.map((s) => {
-          if (s.day === day) return { day: s.day, recipeId };
+          if (s.day === day) return { day: s.day, recipeId, ...(s.guests ? { guests: s.guests } : {}) };
           // Beim Vorkochen wandert der Reste-Tag mit dem gekochten Gericht mit
           if (!current?.kind && s.kind === 'reste' && s.recipeId === previous && s.day > day) return { ...s, recipeId };
           return s;
@@ -252,6 +256,18 @@ export default function App() {
       [key]: prev[key].includes(value) ? prev[key].filter((v) => v !== value) : [...prev[key], value],
     }));
 
+  /** Gekocht → Zutaten im Vorrat abziehen, mit „Rückgängig“ */
+  const consumeFor = (recipeId: string) => {
+    if (state.cooked.includes(recipeId)) return;
+    const slot = state.plan?.slots.find((s) => s.recipeId === recipeId && !s.kind);
+    const people = slot?.guests ?? state.settings?.householdSize ?? 4;
+    const before = state.pantry;
+    const { used } = consumeCooked(before, recipeId, people);
+    if (!used.length) return;
+    setState((prev) => ({ ...prev, pantry: consumeCooked(prev.pantry, recipeId, people).pantry }));
+    showToast({ text: `Aus dem Vorrat abgezogen: ${used.join(', ')}`, undo: () => setState((prev) => ({ ...prev, pantry: before })) });
+  };
+
   /** Foto aufnehmen, lokal speichern, in die Cloud schieben → ID */
   const takePhoto = async (kind: 'essen' | 'bon') => {
     const data = await pickPhoto(kind);
@@ -265,6 +281,7 @@ export default function App() {
   const addMealPhoto = async (recipeId: string) => {
     const id = await takePhoto('essen');
     if (!id) return;
+    consumeFor(recipeId);
     setState((prev) => ({
       ...prev,
       photos: { ...prev.photos, [recipeId]: [{ id, date: new Date().toISOString() }, ...(prev.photos[recipeId] ?? [])] },
@@ -370,7 +387,12 @@ export default function App() {
         isCustom={!BUILTIN_IDS.has(id)}
         onBack={() => setOpenRecipe(null)}
         onToggleFavourite={() => toggleIn('favourites', id)}
-        onToggleCooked={() => toggleIn('cooked', id)}
+        onToggleCooked={() => { consumeFor(id); toggleIn('cooked', id); }}
+        wishes={state.kidWishes ?? {}}
+        onWish={(kid, on) => setState((prev) => {
+          const { [kid]: _, ...rest } = prev.kidWishes ?? {};
+          return { ...prev, kidWishes: on ? { ...rest, [kid]: id } : rest };
+        })}
         onRate={(stars) => setState((prev) => ({ ...prev, ratings: { ...prev.ratings, [id]: stars } }))}
         onAddPhoto={() => addMealPhoto(id)}
         onDeletePhoto={(photoId) => deleteMealPhoto(id, photoId)}
@@ -429,6 +451,24 @@ export default function App() {
         onOpen={setOpenRecipe}
         onSwap={swapDay}
         onChoose={(day) => { setError(null); setPickDay(day); }}
+        wishes={state.kidWishes ?? {}}
+        onMove={(from, to) => setState((prev) => {
+          if (!prev.plan) return prev;
+          const a = prev.plan.slots.find((x) => x.day === from);
+          const b = prev.plan.slots.find((x) => x.day === to);
+          if (!a || !b) return prev;
+          // Gericht, Art (Reste/Restetag) und Personen wandern mit dem Tag
+          const move = (target: typeof a, src: typeof a) => ({ day: target.day, recipeId: src.recipeId, ...(src.kind ? { kind: src.kind } : {}), ...(src.guests ? { guests: src.guests } : {}) });
+          return { ...prev, plan: { ...prev.plan, slots: prev.plan.slots.map((x) => (x.day === from ? move(a, b) : x.day === to ? move(b, a) : x)) } };
+        })}
+        onGuests={(day, guests) => setState((prev) => prev.plan ? {
+          ...prev,
+          plan: { ...prev.plan, slots: prev.plan.slots.map((x) => {
+            if (x.day !== day) return x;
+            const { guests: _, ...rest } = x;
+            return guests ? { ...rest, guests } : rest;
+          }) },
+        } : prev)}
         onRegenerate={() => createPlan(settings, planWeekKey(plan))}
         onPlanNext={planNext}
         onSaveWeek={(name) => markSaved(shown!, true, name)}
@@ -450,6 +490,11 @@ export default function App() {
         pantry={state.pantry}
         extras={state.shopExtras}
         onAddExtra={(n) => addExtra(n)}
+        onBuyAnyway={(name, amount) => {
+          const id = `x${Date.now().toString(36)}`;
+          setState((prev) => ({ ...prev, shopExtras: [...prev.shopExtras, { id, name: capitalize(name), amount, from: 'eigen' }] }));
+          showToast({ text: `${capitalize(name)} kommt doch auf die Liste`, undo: () => setState((prev) => ({ ...prev, shopExtras: prev.shopExtras.filter((x) => x.id !== id) })) });
+        }}
         onToggleExtra={(id) => setState((prev) => ({ ...prev, shopExtras: prev.shopExtras.map((x) => (x.id === id ? { ...x, done: !x.done } : x)) }))}
         onRemoveExtra={(id) => {
           const gone = state.shopExtras.find((x) => x.id === id);
@@ -513,6 +558,13 @@ export default function App() {
         }}
         onLearn={(prices) => setState((prev) => ({ ...prev, userPrices: { ...prev.userPrices, ...prices } }))}
         onBonPhoto={() => takePhoto('bon')}
+        onReceiptRead={(p) => {
+          const { summary } = applyReceipt(state, p);
+          if (!summary.length) return;
+          const before = { checkedItems: state.checkedItems, shopExtras: state.shopExtras, pantry: state.pantry, userPrices: state.userPrices };
+          setState((prev) => applyReceipt(prev, p).state);
+          showToast({ text: `Vom Bon: ${summary.join(', ')}`, undo: () => setState((prev) => ({ ...prev, ...before })) });
+        }}
       />
     );
   } else if (moreView === 'einstellungen') {
@@ -598,7 +650,7 @@ export default function App() {
             </Pressable>
           </View>
         ) : null}
-        <View style={local.main}><View style={[local.body, layout.isDesktop && { maxWidth: 1240 }]}>{body}</View></View>
+        <View style={local.main}><View style={[local.body, layout.isDesktop && { maxWidth: layout.width >= 1600 ? 1680 : 1240 }]}>{body}</View></View>
       </View>
       {showNav && !layout.isDesktop && !(shopMode && tab === 'einkauf') ? (
         <View style={local.tabBar}>

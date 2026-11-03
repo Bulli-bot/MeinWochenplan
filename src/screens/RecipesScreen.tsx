@@ -1,9 +1,9 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { RECIPES, RECIPE_BY_ID } from '../data/recipes';
 import { costWithSwap, eligibleRecipes, portionCost, type PlanContext } from '../logic/generator';
 import type { MealPlan, Protein, Recipe } from '../types';
-import { Button, Chip, Icon, WEEKDAYS_LONG, colors, euro, hov, styles } from '../ui';
+import { Button, Chip, Grid, Icon, Split, WEEKDAYS_LONG, autoColumns, colors, contentWidth, euro, hov, space, styles, useLayout } from '../ui';
 
 type Sort = 'preis' | 'zeit' | 'name';
 const SORTS: [Sort, string][] = [['preis', 'Preis'], ['zeit', 'Kochzeit'], ['name', 'Name']];
@@ -66,6 +66,10 @@ export function RecipesScreen({ context, favourites, filters, onFilters, onOpen,
   const openGroups = filters.openGroups ?? [];
   const set = (patch: Partial<RecipeFilters>) => onFilters({ ...filters, ...patch });
   const { householdSize, weeklyBudget } = context.settings;
+  const { width, isWide } = useLayout();
+  const [showFilters, setShowFilters] = useState(false);
+  const activeFilters = (protein ? 1 : 0) + (onlyMatching ? 1 : 0) + (onlyKids ? 1 : 0);
+  const recipeColumns = isWide ? autoColumns(contentWidth(width) - 340 - space.xl, 320, 3) : width >= 900 ? 2 : 1;
 
   const matchingIds = useMemo(() => new Set(eligibleRecipes(context).map((r) => r.id)), [context]);
   const prices = RECIPES.map((r) => r.pricePerPortion);
@@ -133,37 +137,12 @@ export function RecipesScreen({ context, favourites, filters, onFilters, onOpen,
         </>
       )}
 
-      <TextInput
-        value={query}
-        onChangeText={(q) => set({ query: q })}
-        placeholder="Suchen nach Gericht oder Zutat"
-        placeholderTextColor={colors.muted}
-        style={local.search}
-        accessibilityLabel="Rezepte durchsuchen"
-      />
-
-      <View style={styles.chipRow}>
-        <Chip label="Alle" selected={!protein} onPress={() => set({ protein: null })} />
-        {(Object.keys(PROTEIN_LABELS) as Protein[]).map((p) => (
-          <Chip key={p} label={PROTEIN_LABELS[p]} selected={protein === p} onPress={() => set({ protein: protein === p ? null : p })} />
-        ))}
-      </View>
-      <View style={styles.chipRow}>
-        {SORTS.map(([id, label]) => (
-          <Chip key={id} label={`Nach ${label}`} selected={sort === id} onPress={() => set({ sort: id })} />
-        ))}
-        <Chip label="Nur passende" selected={onlyMatching} onPress={() => set({ onlyMatching: !onlyMatching })} />
-        <Chip label="Kinderfreundlich" selected={onlyKids} onPress={() => set({ onlyKids: !onlyKids })} />
-      </View>
-
-      <Text style={styles.hint}>
-        {shown.length} angezeigt · Preis pro Portion, rechts für {householdSize} {householdSize === 1 ? 'Person' : 'Personen'}
-      </Text>
-
+      <Split
+        main={<>
       {(() => {
         const groups = GROUPS.map((g) => [g, shown.filter((r) => recipeGroup(r) === g)] as const).filter(([, list]) => list.length);
         // Beim Suchen und beim Aussuchen für einen Tag alles offen, sonst nur die aufgeklappten Kategorien
-        const allOpen = !!needle || !!pickFor;
+        const allOpen = !!needle || !!pickFor || isWide;
         const toggleGroup = (g: string) => set({ openGroups: openGroups.includes(g) ? openGroups.filter((x) => x !== g) : [...openGroups, g] });
         return (
           <>
@@ -184,13 +163,58 @@ export function RecipesScreen({ context, favourites, filters, onFilters, onOpen,
                     <Text style={styles.hint}>{list.length} {list.length === 1 ? 'Rezept' : 'Rezepte'} · ab {euro(cheapest)}</Text>
                     {!allOpen ? <Icon name={open ? 'chevron-up' : 'chevron-down'} /> : null}
                   </Pressable>
-                  {open ? list.map(renderRecipe) : null}
+                  {open ? <Grid columns={recipeColumns} gap={10}>{list.map(renderRecipe)}</Grid> : null}
                 </View>
               );
             })}
           </>
         );
       })()}
+        </>}
+        side={<View style={[styles.card, { gap: space.sm }]}>
+      <TextInput
+        value={query}
+        onChangeText={(q) => set({ query: q })}
+        placeholder="Suchen nach Gericht oder Zutat"
+        placeholderTextColor={colors.muted}
+        style={local.search}
+        accessibilityLabel="Rezepte durchsuchen"
+      />
+
+      {!isWide ? (
+        <Chip icon="sliders" label={`Filter & Sortierung${activeFilters ? ` (${activeFilters})` : ''}`} selected={showFilters} onPress={() => setShowFilters(!showFilters)} />
+      ) : null}
+      {isWide || showFilters ? (
+        <>
+      <Text style={local.label}>Eiweiß</Text>
+      <View style={styles.chipRow}>
+        <Chip label="Alle" selected={!protein} onPress={() => set({ protein: null })} />
+        {(Object.keys(PROTEIN_LABELS) as Protein[]).map((p) => (
+          <Chip key={p} label={PROTEIN_LABELS[p]} selected={protein === p} onPress={() => set({ protein: protein === p ? null : p })} />
+        ))}
+      </View>
+      <Text style={local.label}>Sortieren</Text>
+      <View style={styles.chipRow}>
+        {SORTS.map(([id, label]) => (
+          <Chip key={id} label={label} selected={sort === id} onPress={() => set({ sort: id })} />
+        ))}
+      </View>
+      <Text style={local.label}>Nur zeigen</Text>
+      <View style={styles.chipRow}>
+        <Chip icon="check" label="Passt zu mir" selected={onlyMatching} onPress={() => set({ onlyMatching: !onlyMatching })} />
+        <Chip icon="smile" label="Kinderfreundlich" selected={onlyKids} onPress={() => set({ onlyKids: !onlyKids })} />
+      </View>
+        </>
+      ) : null}
+
+      <Text style={styles.hint}>
+        {shown.length} angezeigt · Preis pro Portion, rechts für {householdSize} {householdSize === 1 ? 'Person' : 'Personen'}
+      </Text>
+
+        </View>}
+        sideFirst
+        sideWidth={340}
+      />
       {shown.length === 0 ? <Text style={styles.hint}>Keine Rezepte gefunden.</Text> : null}
     </ScrollView>
   );
@@ -198,6 +222,7 @@ export function RecipesScreen({ context, favourites, filters, onFilters, onOpen,
 
 const local = StyleSheet.create({
   back: { color: colors.accent, fontSize: 16, fontWeight: '600' },
+  label: { fontSize: 12, fontWeight: '700', color: colors.muted, textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 4 },
   group: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 52, paddingHorizontal: 14, borderRadius: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
   groupTitle: { flex: 1, fontSize: 17, fontWeight: '700', color: colors.text },
   search: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, color: colors.text },

@@ -6,7 +6,9 @@ import { parseIngredientLine } from '../logic/customRecipe';
 import { todayIndex } from '../logic/dates';
 import type { ChatMessage } from '../pchelper';
 import type { AppState, Carb, CustomRecipe, Ingredient, Protein, Settings } from '../types';
-import { Card, Chip, Icon, Tag, colors, hov, space, styles } from '../ui';
+import { Card, Chip, Icon, Tag, colors, hov, space, styles, useLayout } from '../ui';
+import { useSoon } from '../logic/leftovers';
+import { dueSoon } from '../logic/pantry';
 
 interface Bubble extends ChatMessage {
   via?: AiVia;
@@ -46,6 +48,7 @@ export function AiScreen({ state, settings, onRecipeDraft }: {
   /** Vorgeschlagenes Rezept zum Prüfen und Speichern öffnen */
   onRecipeDraft: (r: CustomRecipe) => void;
 }) {
+  const { isWide } = useLayout();
   const [messages, setMessages] = useState<Bubble[]>(history);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -91,9 +94,34 @@ export function AiScreen({ state, settings, onRecipeDraft }: {
     ['Günstiger einkaufen', 'Wo kann ich bei meinem Wochenplan am meisten sparen?', false],
   ];
 
+  // Was die KI über den Haushalt weiß – am PC als Seitenspalte neben dem Chat
+  const soon = dueSoon(state.pantry).map((x) => x.item.name);
+  const rest = useSoon(state.pantry).map((x) => x.item.name);
+  const side = (
+    <ScrollView style={local.side} contentContainerStyle={{ padding: space.lg, gap: space.lg }}>
+      <View style={{ gap: space.sm }}>
+        <Text style={styles.sectionTitle}>Schnell fragen</Text>
+        {quick.map(([label, prompt, recipe]) => (
+          <Pressable key={label} onPress={() => (busy ? null : send(prompt, recipe))} accessibilityRole="button"
+            style={(st) => [local.quick, hov(st) && { backgroundColor: colors.cardHover }]}>
+            <Icon name="message-circle" size={16} color={colors.accent} />
+            <Text style={[styles.hint, { flex: 1, color: colors.text }]}>{label}</Text>
+          </Pressable>
+        ))}
+      </View>
+      <View style={{ gap: 6 }}>
+        <Text style={styles.sectionTitle}>Das weiß die KI</Text>
+        <Text style={styles.hint}>{settings.householdSize} Personen · Budget {settings.weeklyBudget} € pro Woche</Text>
+        {state.plan ? <Text style={styles.hint}>Plan: {state.plan.slots.filter((x) => x.recipeId).map((x) => RECIPE_BY_ID[x.recipeId]?.name).filter(Boolean).slice(0, 7).join(', ')}</Text> : null}
+        <Text style={styles.hint}>Vorrat: {state.pantry.length} Dinge{soon.length ? ` · bald leer: ${soon.join(', ')}` : ''}{rest.length ? ` · muss weg: ${rest.join(', ')}` : ''}</Text>
+      </View>
+    </ScrollView>
+  );
+
   return (
-    <View style={styles.screen}>
-      <ScrollView ref={scroll} style={{ flex: 1 }} contentContainerStyle={styles.content}>
+    <View style={[styles.screen, isWide && { flexDirection: 'row' }]}>
+    <View style={{ flex: 1, minWidth: 0 }}>
+      <ScrollView ref={scroll} style={{ flex: 1 }} contentContainerStyle={[styles.content, isWide && { maxWidth: 860, width: '100%', alignSelf: 'center' }]}>
         <View style={local.head}>
           <View style={local.icon}><Icon name="zap" size={20} color={colors.onAccent} /></View>
           <View style={{ flex: 1 }}>
@@ -102,7 +130,7 @@ export function AiScreen({ state, settings, onRecipeDraft }: {
           </View>
         </View>
 
-        {messages.length === 0 ? (
+        {messages.length === 0 && !isWide ? (
           <Card style={{ gap: space.md }}>
             <Text style={styles.sectionTitle}>Womit kann ich helfen?</Text>
             <View style={styles.chipRow}>
@@ -119,7 +147,7 @@ export function AiScreen({ state, settings, onRecipeDraft }: {
         ))}
         {busy ? <View style={[local.bubble, local.bot, { flexDirection: 'row', gap: 8 }]}><ActivityIndicator color={colors.accent} /><Text style={styles.hint}>denkt nach …</Text></View> : null}
 
-        {messages.length > 0 && !busy ? (
+        {messages.length > 0 && !busy && !isWide ? (
           <View style={styles.chipRow}>
             {quick.slice(0, 3).map(([label, prompt, recipe]) => <Chip key={label} label={label} selected={false} onPress={() => send(prompt, recipe)} />)}
             <Chip label="Neu anfangen" selected={false} onPress={() => update([])} />
@@ -136,6 +164,8 @@ export function AiScreen({ state, settings, onRecipeDraft }: {
         </Pressable>
       </View>
     </View>
+      {isWide ? side : null}
+    </View>
   );
 }
 
@@ -148,5 +178,7 @@ const local = StyleSheet.create({
   err: { borderColor: colors.danger },
   text: { fontSize: 15, lineHeight: 22, color: colors.text },
   composer: { flexDirection: 'row', gap: space.sm, padding: space.md, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.surface },
+  side: { width: 340, flexGrow: 0, borderLeftWidth: 1, borderLeftColor: colors.border, backgroundColor: colors.surface },
+  quick: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border },
   send: { width: 44, height: 44, borderRadius: 12, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
 });

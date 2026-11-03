@@ -8,7 +8,7 @@ import { ShopMode, type ShopRow } from './ShopMode';
 import { cheaperElsewhere, itemPrice, lastBonPrice, preferredStore, shopPriceKey, storeKey } from '../logic/shopPrice';
 import { CATEGORY_ORDER, buildShoppingList, formatAmount, isBasic, shoppingListAsText, shoppingTrip, type ShoppingItem } from '../logic/shoppingList';
 import type { Category, MealPlan, PantryItem, Purchase, RecurringItem, Settings, ShopExtra, ShopPrice } from '../types';
-import { Button, Chip, Grid, Icon, colors, euro, hov, space, styles, useLayout } from '../ui';
+import { Button, Chip, Grid, Icon, Split, autoColumns, colors, contentWidth, euro, hov, space, styles, useLayout } from '../ui';
 
 /** „wattepads“ → „Wattepads“ (einheitlich, auch für ältere Einträge) */
 export const capitalize = (s: string) => s.trim().replace(/^\p{Ll}/u, (c) => c.toUpperCase());
@@ -111,7 +111,7 @@ function TileView({ tile, editing, onToggle, onEdit, onDelete, onSave, onHave, o
 
 export function ShoppingListScreen({
   plan, settings, checked, pantry, extras, hidden, amounts, purchases, prices, recurring, catOrder, split, shopMode, onShopMode,
-  onPrice, onRecurring, onCatOrder, onSplit, onToggle, onReset, onHave, onShopped, onAddExtra, onToggleExtra, onRemoveExtra, onEditExtra, onHide, onAmount,
+  onPrice, onRecurring, onCatOrder, onSplit, onToggle, onReset, onHave, onShopped, onAddExtra, onBuyAnyway, onToggleExtra, onRemoveExtra, onEditExtra, onHide, onAmount,
 }: {
   plan: MealPlan;
   settings: Settings;
@@ -147,14 +147,18 @@ export function ShoppingListScreen({
   /** Einkauf fertig → weiter zu Ausgaben (Bon fotografieren) */
   onShopped: () => void;
   onAddExtra: (name: string) => void;
+  /** „Schon im Vorrat“ → doch kaufen (als eigener Artikel mit Menge) */
+  onBuyAnyway: (name: string, amount: string) => void;
   onToggleExtra: (id: string) => void;
   onRemoveExtra: (id: string) => void;
   onEditExtra: (id: string, name: string, amount: string) => void;
   onHide: (key: string, hide: boolean) => void;
   onAmount: (key: string, text: string) => void;
 }) {
-  const { isPhone, isDesktop } = useLayout();
-  const columns = isDesktop ? 5 : isPhone ? 2 : 3;
+  const { isPhone } = useLayout();
+  const { width, isWide } = useLayout();
+  const columns = isPhone ? 2 : autoColumns(contentWidth(width) - (isWide ? 380 + space.xl : 0), 190, 6);
+  const [pantryOpen, setPantryOpen] = useState(false);
   const all = useMemo(() => buildShoppingList(plan, settings.householdSize), [plan, settings.householdSize]);
   const basics = all.filter((i) => isBasic(i.name, settings.basics));
   const { toBuy, fromPantry } = useMemo(() => applyPantry(all.filter((i) => !isBasic(i.name, settings.basics)), pantry), [all, pantry, settings.basics]);
@@ -330,6 +334,8 @@ export function ShoppingListScreen({
   const trip2 = items.filter((i) => shoppingTrip(i, settings.shopRhythm) === 2);
   const inCart = [...extras.filter((x) => x.done).map(extraTile), ...items.filter((i) => checked.includes(i.key)).map(planTile)];
 
+  const startBtn = total - done > 0 ? <Button label="Einkaufen starten" icon="shopping-cart" onPress={() => onShopMode(true)} /> : null;
+
   if (shopMode) {
     // Abschnitt je Zeile: bei „Nach Laden aufteilen“ der günstigste Laden, sonst der Ladenbereich
     const storeOf = (name: string) => (split ? preferredStore(name, purchases) ?? 'Egal wo' : null);
@@ -363,8 +369,9 @@ export function ShoppingListScreen({
         <View style={local.progress}><View style={[local.progressFill, { width: `${total ? (done / total) * 100 : 0}%` }]} /></View>
       </View>
 
-      {total - done > 0 ? <Button label="Einkaufen starten" icon="shopping-cart" onPress={() => onShopMode(true)} /> : null}
-
+      {!isWide ? startBtn : null}
+      <Split
+        main={<>
       <View style={local.addRow}>
         <TextInput value={newItem} onChangeText={setNewItem} onSubmitEditing={add} placeholder="Artikel hinzufügen, z. B. Kaffee"
           placeholderTextColor={colors.muted} style={[styles.input, { flex: 1 }]} returnKeyType="done" />
@@ -442,6 +449,55 @@ export function ShoppingListScreen({
         </View>
       ) : null}
 
+        </>}
+        side={<>
+      {isWide ? (
+        <View style={[styles.card, { gap: 6 }]}>
+          <Text style={styles.hint}>Noch offen</Text>
+          <Text style={local.bigSum}>{euro(openCost)}</Text>
+          <Text style={styles.hint}>{total - done} von {total} Artikeln{unpriced ? ` · ${unpriced} ohne Preis` : ''}</Text>
+        </View>
+      ) : null}
+          {isWide ? startBtn : null}
+      {notice ? <Text style={styles.hint}>{notice}</Text> : null}
+      <Button label={bringBusy ? 'Sende an Bring! …' : 'An Bring! senden'} variant="secondary" icon="shopping-bag" onPress={() => (bringBusy ? null : toBring())} />
+      <Button label="Einkauf erledigt – Bon fotografieren" variant="secondary" icon="camera" onPress={onShopped} />
+      <View style={styles.row}>
+        <View style={{ flex: 1, minWidth: 150 }}><Button label="Als Text teilen" variant="ghost" icon="share" onPress={share} /></View>
+        <View style={{ flex: 1, minWidth: 150 }}><Button label="Haken zurücksetzen" variant="ghost" icon="rotate-ccw" onPress={onReset} /></View>
+      </View>
+      {fromPantry.length ? (
+        <View style={[styles.card, { gap: 6 }]}>
+          <Pressable onPress={() => setPantryOpen(!pantryOpen)} accessibilityRole="button" accessibilityState={{ expanded: pantryOpen }} style={local.orderRow}>
+            <Text style={[styles.sectionTitle, { flex: 1 }]}>Schon im Vorrat <Text style={styles.hint}>· {fromPantry.length} Dinge da</Text></Text>
+            <Icon name={pantryOpen ? 'chevron-up' : 'chevron-down'} color={colors.muted} />
+          </Pressable>
+          {pantryOpen ? (
+            <>
+              <Text style={styles.hint}>Antippen = doch kaufen (kommt als eigener Artikel auf die Liste).</Text>
+              {order.map((cat) => {
+                const list = fromPantry.filter((it) => it.category === cat);
+                if (!list.length) return null;
+                return (
+                  <View key={cat} style={{ gap: 2 }}>
+                    <Text style={local.section}>{cat}</Text>
+                    {list.map((it) => (
+                      <Pressable key={it.key} onPress={() => onBuyAnyway(it.name, formatAmount(it.amount, it.unit))} accessibilityRole="button"
+                        accessibilityLabel={`${it.name} doch kaufen`} style={(st) => [local.pantryRow, hov(st) && local.pantryHover]}>
+                        <Icon name="check" size={14} color={colors.accent} />
+                        <Text style={[styles.hint, { flex: 1, color: colors.text }]} numberOfLines={1}>{it.name}</Text>
+                        <Text style={styles.hint}>{formatAmount(it.amount, it.unit)}</Text>
+                        <Icon name="plus-circle" size={16} color={colors.muted} />
+                      </Pressable>
+                    ))}
+                  </View>
+                );
+              })}
+            </>
+          ) : null}
+        </View>
+      ) : null}
+
       {recurring.length ? (
         <View style={[styles.card, { gap: 6 }]}>
           <Text style={styles.sectionTitle}>Kommt regelmäßig</Text>
@@ -458,13 +514,6 @@ export function ShoppingListScreen({
         </View>
       ) : null}
 
-      {fromPantry.length ? (
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Schon im Vorrat</Text>
-          <Text style={styles.hint}>{fromPantry.map((it) => `${formatAmount(it.amount, it.unit)} ${it.name}`).join(' · ')}</Text>
-        </View>
-      ) : null}
-
       {basics.length ? (
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Grundzutaten – hast du</Text>
@@ -472,13 +521,8 @@ export function ShoppingListScreen({
         </View>
       ) : null}
 
-      {notice ? <Text style={styles.hint}>{notice}</Text> : null}
-      <Button label={bringBusy ? 'Sende an Bring! …' : 'An Bring! senden'} variant="secondary" icon="shopping-bag" onPress={() => (bringBusy ? null : toBring())} />
-      <Button label="Einkauf erledigt – Bon fotografieren" variant="secondary" icon="camera" onPress={onShopped} />
-      <View style={styles.row}>
-        <View style={{ flex: 1, minWidth: 150 }}><Button label="Als Text teilen" variant="ghost" icon="share" onPress={share} /></View>
-        <View style={{ flex: 1, minWidth: 150 }}><Button label="Haken zurücksetzen" variant="ghost" icon="rotate-ccw" onPress={onReset} /></View>
-      </View>
+        </>}
+      />
     </ScrollView>
   );
 }
@@ -505,6 +549,9 @@ const local = StyleSheet.create({
   editBtn: { flex: 1, height: 36, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   helpBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  bigSum: { fontSize: 30, fontWeight: '800', color: colors.text, letterSpacing: -0.5 },
+  pantryRow: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 36, paddingHorizontal: 8, borderRadius: 8 },
+  pantryHover: { backgroundColor: colors.cardHover },
   orderRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   repeatRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
   repeatChip: { paddingHorizontal: 7, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: colors.border },

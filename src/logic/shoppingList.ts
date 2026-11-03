@@ -37,7 +37,7 @@ export function buildShoppingList(plan: MealPlan, householdSize: number): Shoppi
     for (const ing of recipe.ingredients) {
       const key = `${ing.name.toLowerCase()}|${ing.unit}`;
       const existing = items.get(key);
-      const amount = ing.amount * householdSize;
+      const amount = ing.amount * (slot.guests ?? householdSize);
       if (existing) {
         existing.amount += amount;
         if (!existing.recipes.includes(recipe.name)) existing.recipes.push(recipe.name);

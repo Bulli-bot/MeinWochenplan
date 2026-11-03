@@ -80,6 +80,8 @@ export interface PlanSlot {
   recipeId: string;
   /** „reste“ = Reste vom Vortag (doppelt gekocht), „restetag“ = fester Restetag ohne Kochen */
   kind?: 'reste' | 'restetag';
+  /** Personen an diesem Tag, wenn abweichend vom Haushalt (z. B. Gäste) */
+  guests?: number;
 }
 
 export interface MealPlan {
@@ -130,6 +132,8 @@ export interface AppState {
   shopSplit?: boolean;
   /** Artikel, die regelmäßig von selbst auf die Liste kommen */
   recurring?: RecurringItem[];
+  /** Wunschessen: Kind → Rezept-ID (für den nächsten Plan) */
+  kidWishes?: Record<string, string>;
   /** Auszug für das Kalender-Abo (wird von der App geschrieben, vom Server gelesen) */
   calendar?: CalendarFeed;
 }
@@ -204,6 +208,8 @@ export interface PantryItem {
   remindDays?: number;
   /** Haltbar bis (ISO-Datum) – für den Reste-Vorschlag */
   useBy?: string;
+  /** Bald leer → von selbst auf die Einkaufsliste */
+  autoList?: boolean;
 }
 
 export type SpendCategory = 'plan' | 'grund' | 'extra' | 'verzichtbar' | 'pfand';

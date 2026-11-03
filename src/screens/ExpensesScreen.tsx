@@ -4,7 +4,8 @@ import { Badge, BigPhoto, Field, Link, Thumb } from '../components';
 import { readReceiptAny } from '../ai';
 import { CATEGORY_LABEL, CATEGORY_ORDER, bonKey, classifyWithMemory, isUnclear, learnPrice, matchIngredient, sumBy } from '../logic/receipt';
 import type { BonName, Purchase, PurchaseItem, SpendCategory, UserPrice } from '../types';
-import { Button, Card, Chip, Icon, colors, euro, hov, space, styles } from '../ui';
+import { Button, Card, Chip, Icon, Split, colors, euro, hov, space, styles } from '../ui';
+import { isoWeek } from '../logic/dates';
 import { getPhotoData } from '../photos';
 
 const TONE: Record<SpendCategory, string> = {
@@ -23,7 +24,7 @@ function parseDate(text: string): string {
   return new Date(year, Number(m[2]) - 1, Number(m[1]), 12).toISOString();
 }
 
-export function ExpensesScreen({ purchases, budget, plannedCost, planIngredients, bonNames, currentWeek, weekOf, onSave, onDelete, onLearn, onLearnName, onBonPhoto }: {
+export function ExpensesScreen({ purchases, budget, plannedCost, planIngredients, bonNames, currentWeek, weekOf, onSave, onDelete, onLearn, onLearnName, onBonPhoto, onReceiptRead }: {
   purchases: Purchase[];
   budget: number;
   /** Geschätzte Kosten des aktuellen Wochenplans */
@@ -41,11 +42,15 @@ export function ExpensesScreen({ purchases, budget, plannedCost, planIngredients
   onLearnName: (key: string, value: BonName) => void;
   /** Foto aufnehmen, speichern, hochladen → Foto-ID */
   onBonPhoto: () => Promise<string | null>;
+  /** Bon fertig ausgelesen → Liste abhaken, Vorrat auffüllen, Preise übernehmen */
+  onReceiptRead: (p: Purchase) => void;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [manual, setManual] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  /** Aufgeklappte Woche in der Tabelle; null = aktuelle Woche offen, '' = alle zu */
+  const [openWeek, setOpenWeek] = useState<string | null>(null);
 
   const weeks = useMemo(() => {
     const map = new Map<string, Purchase[]>();
@@ -86,7 +91,9 @@ export function ExpensesScreen({ purchases, budget, plannedCost, planIngredients
       const gap = r.summe ? Math.round((r.summe - sum) * 100) / 100 : 0;
       // Nicht erkannte Zeilen sichtbar machen statt sie stillschweigend in der Summe zu verstecken
       if (Math.abs(gap) >= 0.05) items.push({ name: 'Nicht erkannt (Rest zur Bon-Summe)', price: gap, category: 'extra' });
-      onSave({ ...p, store: r.laden || 'Einkauf', date: r.datum ? parseDate(r.datum) : p.date, total: r.summe ?? sum, items, status: 'fertig' });
+      const saved: Purchase = { ...p, store: r.laden || 'Einkauf', date: r.datum ? parseDate(r.datum) : p.date, total: r.summe ?? sum, items, status: 'fertig' };
+      onSave(saved);
+      onReceiptRead(saved);
       const unclear = items.filter(isUnclear).length;
       setNotice(`${items.length} Positionen erkannt (${r.model}). ${Math.abs(gap) >= 0.05 ? `${euro(gap)} nicht zugeordnet – steht unten als eigene Zeile. ` : 'Summe stimmt mit dem Bon überein. '}${unclear ? `${unclear} Artikel kenne ich noch nicht – bitte kurz sagen, was das ist.` : 'Kategorien bitte kurz prüfen.'}`);
       setOpenId(p.id);
@@ -105,10 +112,10 @@ export function ExpensesScreen({ purchases, budget, plannedCost, planIngredients
   const current = weeks.find(([k]) => k === currentWeek)?.[1] ?? [];
   const currentSum = current.reduce((s, p) => s + p.total, 0);
   const ratio = budget ? currentSum / budget : 0;
+  const done = purchases.filter((p) => p.status === 'fertig');
 
-  return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <Text style={styles.h1}>Ausgaben</Text>
+  const side = (
+    <>
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Woche ab {new Date(currentWeek).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}</Text>
         <Text style={[local.big, { color: ratio > 1 ? colors.danger : ratio > 0.85 ? colors.warn : colors.accent }]}>{euro(currentSum)}</Text>
@@ -117,8 +124,8 @@ export function ExpensesScreen({ purchases, budget, plannedCost, planIngredients
       </View>
 
       <View style={styles.row}>
-        <View style={{ flex: 1 }}><Button label="Bon fotografieren" icon="camera" onPress={photoBon} /></View>
-        <View style={{ flex: 1 }}><Button label="Betrag eintragen" variant="secondary" onPress={() => setManual((v) => !v)} /></View>
+        <View style={{ flex: 1, minWidth: 150 }}><Button label="Bon fotografieren" icon="camera" onPress={photoBon} /></View>
+        <View style={{ flex: 1, minWidth: 150 }}><Button label="Betrag eintragen" variant="secondary" onPress={() => setManual((v) => !v)} /></View>
       </View>
       {manual ? <ManualEntry onSave={(p) => { onSave(p); setManual(false); }} /> : null}
       {notice ? <Text style={styles.hint}>{notice}</Text> : null}
@@ -139,27 +146,59 @@ export function ExpensesScreen({ purchases, budget, plannedCost, planIngredients
         </View>
       ))}
 
-      <MonthOverview purchases={purchases.filter((p) => p.status === 'fertig')} />
+      <MonthOverview purchases={done} budget={budget} />
+    </>
+  );
 
+  const main = (
+    <View style={[styles.card, { gap: 0, paddingVertical: space.sm }]}>
+      <View style={[local.weekRow, { borderTopWidth: 0 }]}>
+        <Text style={[local.th, { flex: 1 }]}>Woche</Text>
+        <Text style={[local.th, local.num]}>Ausgaben</Text>
+        <Text style={[local.th, local.num]}>zum Budget</Text>
+        <Text style={[local.th, { width: 24 }]} />
+      </View>
       {weeks.map(([week, list]) => {
         const sum = list.reduce((s, p) => s + p.total, 0);
+        const diff = sum - budget;
+        const isOpen = openWeek === week || (openWeek === null && week === currentWeek);
         return (
-          <View key={week} style={styles.card}>
-            <Text style={styles.sectionTitle}>Woche ab {new Date(week).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })} · {euro(sum)}</Text>
-            <CategoryBar purchases={list} />
-            {list.filter((p) => p.status === 'fertig').map((p) => {
-              const unclear = p.items.filter(isUnclear).length;
-              return (
-                <Pressable key={p.id} onPress={() => setOpenId(p.id)} style={local.purchase}>
-                  <Text style={local.title}>{fmtDate(p.date)} · {p.store || 'Einkauf'}{unclear ? <Text style={[styles.hint, { color: colors.warn }]}>  · {unclear} unklar</Text> : null}</Text>
-                  <Text style={local.amount}>{euro(p.total)} ›</Text>
-                </Pressable>
-              );
-            })}
+          <View key={week}>
+            <Pressable onPress={() => setOpenWeek(isOpen ? '' : week)} accessibilityRole="button" accessibilityState={{ expanded: isOpen }}
+              style={(st) => [local.weekRow, hov(st) && { backgroundColor: colors.cardHover }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={local.title}>KW {isoWeek(new Date(week))} <Text style={styles.hint}>· ab {new Date(week).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}</Text></Text>
+                <Text style={styles.hint}>{list.length === 1 ? '1 Einkauf' : `${list.length} Einkäufe`}</Text>
+              </View>
+              <Text style={[local.amount, local.num]}>{euro(sum)}</Text>
+              <Text style={[local.num, { fontWeight: '700', color: diff > 0 ? colors.danger : colors.accent }]}>{diff > 0 ? '+' : '−'}{euro(Math.abs(diff))}</Text>
+              <Icon name={isOpen ? 'chevron-up' : 'chevron-down'} size={18} color={colors.muted} />
+            </Pressable>
+            {isOpen ? (
+              <View style={local.weekBody}>
+                <CategoryBar purchases={list} />
+                {list.filter((p) => p.status === 'fertig').map((p) => {
+                  const unclear = p.items.filter(isUnclear).length;
+                  return (
+                    <Pressable key={p.id} onPress={() => setOpenId(p.id)} style={local.purchase}>
+                      <Text style={local.title}>{fmtDate(p.date)} · {p.store || 'Einkauf'}{unclear ? <Text style={[styles.hint, { color: colors.warn }]}>  · {unclear} unklar</Text> : null}</Text>
+                      <Text style={local.amount}>{euro(p.total)} ›</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : null}
           </View>
         );
       })}
-      {!purchases.length ? <Text style={styles.hint}>Noch keine Einkäufe. Nach dem Einkaufen den Bon fotografieren – den Rest macht die KI.</Text> : null}
+      {!purchases.length ? <Text style={[styles.hint, { padding: space.md }]}>Noch keine Einkäufe. Nach dem Einkaufen den Bon fotografieren – den Rest macht die KI.</Text> : null}
+    </View>
+  );
+
+  return (
+    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      <Text style={styles.h1}>Ausgaben</Text>
+      <Split sideFirst sideWidth={420} main={main} side={side} />
     </ScrollView>
   );
 }
@@ -168,8 +207,8 @@ const monthKey = (iso: string) => iso.slice(0, 7);
 const monthLabel = (key: string, long = false) =>
   new Date(`${key}-15`).toLocaleDateString('de-DE', long ? { month: 'long', year: 'numeric' } : { month: 'short' });
 
-/** Monate nebeneinander: Summe, Kategorien, Trend bei „verzichtbar“ und die teuersten Artikel. */
-function MonthOverview({ purchases }: { purchases: Purchase[] }) {
+/** Monate: Summe gegen Monatsbudget, Kategorien als Balken, „verzichtbar“ mit Trend, die teuersten Artikel. */
+function MonthOverview({ purchases, budget }: { purchases: Purchase[]; budget: number }) {
   const months = useMemo(() => {
     const map = new Map<string, Purchase[]>();
     for (const p of purchases) {
@@ -180,16 +219,21 @@ function MonthOverview({ purchases }: { purchases: Purchase[] }) {
   }, [purchases]);
   const [sel, setSel] = useState<string | null>(null);
   if (!months.length) return null;
-  const idx = Math.max(0, months.findIndex(([k]) => k === sel));
-  const selIdx = sel ? idx : months.length - 1;
+  const found = months.findIndex(([k]) => k === sel);
+  const selIdx = found >= 0 ? found : months.length - 1;
   const [key, list] = months[selIdx];
   const prev = selIdx > 0 ? months[selIdx - 1][1] : null;
   const total = (l: Purchase[]) => l.reduce((s, p) => s + p.total, 0);
-  const max = Math.max(...months.map(([, l]) => total(l)), 1);
+  const sum = total(list);
+  // Monatsbudget aus dem Wochenbudget (Tage im Monat / 7)
+  const [y, m] = key.split('-').map(Number);
+  const monthBudget = Math.round(budget * (new Date(y, m, 0).getDate() / 7));
+  const max = Math.max(...months.map(([, l]) => total(l)), monthBudget, 1);
   const sums = sumBy(list);
   const prevSums = prev ? sumBy(prev) : null;
-  const diff = prev ? total(list) - total(prev) : null;
+  const diff = prev ? sum - total(prev) : null;
   const waste = prevSums ? sums.verzichtbar - prevSums.verzichtbar : null;
+  const catTotal = CATEGORY_ORDER.reduce((s, c) => s + Math.max(0, sums[c]), 0) || 1;
 
   // Teuerste Artikel des Monats (gleiche Artikel zusammengezählt, ohne Pfand)
   const top = new Map<string, { name: string; sum: number; count: number }>();
@@ -207,33 +251,63 @@ function MonthOverview({ purchases }: { purchases: Purchase[] }) {
   const topList = [...top.values()].sort((a, b) => b.sum - a.sum).slice(0, 5);
 
   return (
-    <View style={[styles.card, { gap: space.sm }]}>
-      <Text style={styles.sectionTitle}>Monate</Text>
-      <View style={local.months}>
-        {months.map(([k, l], i) => {
-          const sum = total(l);
-          const on = i === selIdx;
-          return (
-            <Pressable key={k} onPress={() => setSel(k)} style={local.monthCol} accessibilityLabel={`${monthLabel(k, true)}: ${euro(sum)}`}>
-              <Text style={[styles.hint, { fontSize: 11 }]}>{Math.round(sum)} €</Text>
-              <View style={local.monthTrack}>
-                <View style={[local.monthFill, { height: `${Math.max(4, (sum / max) * 100)}%`, backgroundColor: on ? colors.accent : colors.border }]} />
-              </View>
-              <Text style={[styles.hint, on && { color: colors.text, fontWeight: '700' }]}>{monthLabel(k)}</Text>
-            </Pressable>
-          );
-        })}
+    <View style={[styles.card, { gap: space.md }]}>
+      <View style={local.catHead}>
+        <Text style={styles.sectionTitle}>{monthLabel(key, true)}</Text>
+        <Text style={styles.hint}>{list.length} Einkäufe</Text>
       </View>
-      <Text style={styles.h2}>{monthLabel(key, true)} · {euro(total(list))}</Text>
-      <Text style={styles.hint}>
-        {list.length} Einkäufe{diff !== null ? ` · ${diff > 0 ? '+' : '−'}${euro(Math.abs(diff))} zum Vormonat` : ''}
-      </Text>
-      <CategoryBar purchases={list} />
-      {waste !== null ? (
-        <Text style={[styles.hint, { color: waste > 0 ? colors.warn : colors.accent }]}>
-          Verzichtbar: {euro(sums.verzichtbar)} – {waste > 0.004 ? `${euro(waste)} mehr` : waste < -0.004 ? `${euro(-waste)} weniger` : 'gleich viel'} als im Vormonat
+      <View style={{ gap: 4 }}>
+        <Text style={[local.big, { color: sum > monthBudget ? colors.danger : colors.text }]}>{euro(sum)}</Text>
+        <Text style={styles.hint}>
+          Monatsbudget ca. {euro(monthBudget)}{diff !== null ? ` · ${diff > 0 ? '+' : '−'}${euro(Math.abs(diff))} zum Vormonat` : ''}
         </Text>
-      ) : null}
+        <View style={local.catTrack}>
+          <View style={{ width: `${Math.min(100, (sum / monthBudget) * 100)}%`, height: 10, backgroundColor: sum > monthBudget ? colors.danger : colors.accent }} />
+        </View>
+      </View>
+
+      <View style={[local.wasteBox, { borderColor: waste !== null && waste > 0 ? colors.warn : colors.border }]}>
+        <Text style={styles.hint}>Davon verzichtbar</Text>
+        <Text style={[local.wasteSum, { color: TONE.verzichtbar }]}>{euro(sums.verzichtbar)} <Text style={styles.hint}>· {Math.round((sums.verzichtbar / (sum || 1)) * 100)} %</Text></Text>
+        {waste !== null ? (
+          <Text style={[styles.hint, { color: waste > 0 ? colors.warn : colors.accent }]}>
+            {waste > 0.004 ? `${euro(waste)} mehr` : waste < -0.004 ? `${euro(-waste)} weniger` : 'gleich viel'} als im Vormonat
+          </Text>
+        ) : null}
+      </View>
+
+      <View style={{ gap: space.sm }}>
+        {CATEGORY_ORDER.filter((c) => sums[c] > 0.004).map((c) => (
+          <View key={c} style={local.catRow}>
+            <View style={local.catHead}>
+              <Text style={[styles.hint, { color: colors.text }]}>{CATEGORY_LABEL[c]}</Text>
+              <Text style={styles.hint}>{euro(sums[c])} · {Math.round((sums[c] / catTotal) * 100)} %</Text>
+            </View>
+            <View style={local.catTrack}><View style={{ width: `${(sums[c] / catTotal) * 100}%`, height: 10, backgroundColor: TONE[c] }} /></View>
+          </View>
+        ))}
+      </View>
+
+      {months.length > 1 ? (
+        <View style={local.months}>
+          {months.map(([k, l], i) => {
+            const v = total(l);
+            const on = i === selIdx;
+            return (
+              <Pressable key={k} onPress={() => setSel(k)} style={local.monthCol} accessibilityLabel={`${monthLabel(k, true)}: ${euro(v)}`}>
+                <Text style={[styles.hint, { fontSize: 11 }]}>{Math.round(v)} €</Text>
+                <View style={local.monthTrack}>
+                  <View style={[local.monthFill, { height: `${Math.max(4, (v / max) * 100)}%`, backgroundColor: on ? colors.accent : colors.border }]} />
+                </View>
+                <Text style={[styles.hint, on && { color: colors.text, fontWeight: '700' }]}>{monthLabel(k)}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : (
+        <Text style={styles.hint}>Den Vergleich mit anderen Monaten gibt es, sobald Bons aus mindestens zwei Monaten da sind.</Text>
+      )}
+
       {topList.length ? (
         <View style={{ gap: 2 }}>
           <Text style={[styles.hint, { fontWeight: '700', color: colors.text }]}>Am teuersten</Text>
@@ -444,6 +518,15 @@ const local = StyleSheet.create({
   monthTrack: { height: 80, width: '100%', maxWidth: 44, justifyContent: 'flex-end' },
   monthFill: { width: '100%', borderRadius: 6 },
   topRow: { flexDirection: 'row', gap: 8 },
+  weekRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingVertical: 10, paddingHorizontal: space.sm, borderTopWidth: 1, borderTopColor: colors.border, borderRadius: 8 },
+  weekBody: { paddingHorizontal: space.sm, paddingBottom: space.md, gap: 4 },
+  th: { fontSize: 12, fontWeight: '700', color: colors.muted, textTransform: 'uppercase', letterSpacing: 0.6 },
+  num: { width: 96, textAlign: 'right' },
+  catRow: { gap: 4 },
+  catHead: { flexDirection: 'row', justifyContent: 'space-between' },
+  wasteBox: { borderWidth: 1, borderRadius: 12, padding: space.md, gap: 2 },
+  wasteSum: { fontSize: 22, fontWeight: '800' },
+  catTrack: { height: 10, borderRadius: 5, backgroundColor: colors.input, overflow: 'hidden' },
   big: { fontSize: 34, fontWeight: '800' },
   bar: { flexDirection: 'row', height: 12, borderRadius: 6, overflow: 'hidden', backgroundColor: colors.input },
   legend: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
