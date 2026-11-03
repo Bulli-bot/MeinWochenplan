@@ -1,5 +1,5 @@
 import { RECIPE_BY_ID } from './data/recipes';
-import { helperChat, helperStatus, readReceipt, type ChatMessage, type ReceiptResult } from './pchelper';
+import { helperChat, helperImage, helperStatus, readReceipt, type ChatMessage, type ReceiptResult } from './pchelper';
 import { supabase } from './supabase';
 import type { AppState, Settings } from './types';
 
@@ -51,6 +51,28 @@ export async function readReceiptAny(image: string): Promise<ReceiptResult & { v
     }
   }
   return { ...(await gemini<ReceiptResult>({ mode: 'bon', image })), via: 'Gemini' };
+}
+
+/** Foto mit eigener Frage lesen (Rezept vom Kochbuch, Kühlschrank): am PC lokal, unterwegs über Gemini. Antwort als JSON. */
+export async function askImage<T>(image: string, prompt: string): Promise<T & { via: AiVia }> {
+  let text: string | null = null;
+  let via: AiVia = 'PC';
+  if (await pcAvailable()) {
+    try {
+      text = (await helperImage(image, prompt)).text;
+    } catch {
+      helperOk = null;
+    }
+  }
+  if (text === null) {
+    text = (await gemini<{ text: string }>({ mode: 'bild', image, prompt })).text;
+    via = 'Gemini';
+  }
+  try {
+    return { ...(JSON.parse(text.replace(/^```(?:json)?|```$/g, '').trim()) as T), via };
+  } catch {
+    throw new Error('Die KI hat das Foto nicht lesbar beantwortet – noch einmal mit mehr Licht versuchen.');
+  }
 }
 
 /** Was die KI über den Haushalt wissen soll – ohne Namen und E-Mail-Adressen. */

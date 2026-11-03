@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { formatAmount } from '../logic/shoppingList';
 import type { Recipe } from '../types';
-import { Button, Icon, colors, radius, space, styles } from '../ui';
+import { Button, Icon, colors, radius, space, styles, useLayout } from '../ui';
 import { useWakeLock } from './ShopMode';
 
 /** „20 Minuten“, „10–15 Min.“, „1 Stunde“ → Minuten (die größere Zahl bei Spannen) */
@@ -13,41 +13,24 @@ export function stepMinutes(step: string): number | null {
   return /^st/i.test(m[3]) ? n * 60 : n;
 }
 
+/** Schritte ohne Zeitangabe zählen mit 5 Minuten (Schneiden, Anrichten …) */
+const DEFAULT_STEP = 5;
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+const hhmm = (d: Date) => d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
 
-/** Ein Wecker für den aktuellen Schritt – piept und vibriert am Ende (soweit das Gerät es kann). */
-function StepTimer({ minutes }: { minutes: number }) {
-  const [left, setLeft] = useState<number | null>(null);
-  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
-  useEffect(() => () => { if (timer.current) clearInterval(timer.current); }, []);
-  const start = () => {
-    if (timer.current) clearInterval(timer.current);
-    const end = Date.now() + minutes * 60000;
-    setLeft(minutes * 60);
-    timer.current = setInterval(() => {
-      const s = Math.max(0, Math.round((end - Date.now()) / 1000));
-      setLeft(s);
-      if (s === 0 && timer.current) {
-        clearInterval(timer.current);
-        timer.current = null;
-        ring();
-      }
-    }, 500);
-  };
-  const stop = () => {
-    if (timer.current) clearInterval(timer.current);
-    timer.current = null;
-    setLeft(null);
-  };
-  return left === null ? (
-    <Button label={`Timer ${minutes} Min.`} variant="secondary" icon="clock" onPress={start} />
-  ) : (
-    <View style={[local.timer, left === 0 && { borderColor: colors.warn }]}>
-      <Text style={[local.timerText, left === 0 && { color: colors.warn }]}>{left === 0 ? 'Fertig!' : mmss(left)}</Text>
-      <Pressable onPress={stop} style={local.timerStop} accessibilityRole="button"><Text style={styles.smallText}>{left === 0 ? 'OK' : 'Stopp'}</Text></Pressable>
-    </View>
-  );
+/** Uhrzeit für jeden Schritt, rückwärts gerechnet von der Essenszeit */
+export function schedule(steps: string[], eatAt: Date): Date[] {
+  const mins = steps.map((s) => stepMinutes(s) ?? DEFAULT_STEP);
+  const total = mins.reduce((a, b) => a + b, 0);
+  let t = eatAt.getTime() - total * 60000;
+  return mins.map((m) => {
+    const at = new Date(t);
+    t += m * 60000;
+    return at;
+  });
 }
+
+interface Timer { id: number; label: string; end: number; done?: boolean }
 
 function ring() {
   if (Platform.OS !== 'web') return;
@@ -70,7 +53,32 @@ function ring() {
   }
 }
 
-/** Kochmodus: Schritt für Schritt in großer Schrift, Timer pro Schritt, Bildschirm bleibt an. */
+/** Mehrere Timer gleichzeitig (Suppe köchelt, Baguette im Ofen) – laufen beim Weiterblättern weiter. */
+function useTimers() {
+  const [timers, setTimers] = useState<Timer[]>([]);
+  const [, tick] = useState(0);
+  const ref = useRef(timers);
+  ref.current = timers;
+  useEffect(() => {
+    const iv = setInterval(() => {
+      const now = Date.now();
+      const finished = ref.current.filter((t) => !t.done && t.end <= now);
+      if (finished.length) {
+        ring();
+        setTimers((list) => list.map((t) => (finished.includes(t) ? { ...t, done: true } : t)));
+      }
+      tick((n) => n + 1);
+    }, 500);
+    return () => clearInterval(iv);
+  }, []);
+  return {
+    timers,
+    start: (label: string, minutes: number) => setTimers((list) => [...list, { id: Date.now(), label, end: Date.now() + minutes * 60000 }]),
+    stop: (id: number) => setTimers((list) => list.filter((t) => t.id !== id)),
+  };
+}
+
+/** Kochmodus: Zeitplan ab der Essenszeit, Schritt für Schritt in großer Schrift, mehrere Timer, Bildschirm bleibt an. */
 export function CookMode({ recipe, people, isCooked, onDone, onClose }: {
   recipe: Recipe;
   people: number;
@@ -80,18 +88,90 @@ export function CookMode({ recipe, people, isCooked, onDone, onClose }: {
   onClose: () => void;
 }) {
   const awake = useWakeLock();
-  // -1 = Zutaten bereitlegen, danach die Schritte
-  const [idx, setIdx] = useState(-1);
+  const { isWide, isTablet } = useLayout();
   const steps = recipe.steps;
+  const totalMin = steps.reduce((s, x) => s + (stepMinutes(x) ?? DEFAULT_STEP), 0);
+  // Essenszeit: 18:30, oder – wenn das schon zu knapp ist – jetzt plus Kochzeit, auf 5 Minuten gerundet
+  const [eatAt, setEatAt] = useState(() => {
+    const d = new Date();
+    d.setHours(18, 30, 0, 0);
+    const earliest = Date.now() + totalMin * 60000;
+    if (d.getTime() < earliest) return new Date(Math.ceil(earliest / 300000) * 300000);
+    return d;
+  });
+  const times = schedule(steps, eatAt);
+  const shift = (min: number) => setEatAt((d) => new Date(d.getTime() + min * 60000));
+  // -1 = Zutaten und Zeitplan, danach die Schritte
+  const [idx, setIdx] = useState(-1);
   const last = idx === steps.length - 1;
   const minutes = idx >= 0 ? stepMinutes(steps[idx]) : null;
+  const { timers, start, stop } = useTimers();
+  const twoCol = isWide || isTablet;
+
+  const plan = (
+    <View style={{ gap: 2 }}>
+      <View style={local.planHead}>
+        <Text style={[styles.sectionTitle, { flex: 1 }]}>Essen um {hhmm(eatAt)}</Text>
+        <Pressable onPress={() => shift(-5)} style={local.small} accessibilityLabel="5 Minuten früher"><Text style={styles.smallText}>−5</Text></Pressable>
+        <Pressable onPress={() => shift(5)} style={local.small} accessibilityLabel="5 Minuten später"><Text style={styles.smallText}>+5 Min.</Text></Pressable>
+      </View>
+      <Text style={styles.hint}>Los geht’s um {hhmm(times[0] ?? eatAt)} · ca. {totalMin} Min.</Text>
+      {steps.map((s, i) => (
+        <Pressable key={i} onPress={() => setIdx(i)} style={[local.planRow, i === idx && local.planNow, i < idx && { opacity: 0.45 }]}>
+          <Text style={[local.planTime, i === idx && { color: colors.accent }]}>{hhmm(times[i])}</Text>
+          <Text style={[styles.hint, { flex: 1, color: colors.text }]} numberOfLines={2}>{s}</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+
+  const timerList = timers.length ? (
+    <View style={{ gap: space.sm }}>
+      {timers.map((t) => {
+        const left = Math.max(0, Math.round((t.end - Date.now()) / 1000));
+        return (
+          <View key={t.id} style={[local.timer, t.done && { borderColor: colors.warn }]}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.hint} numberOfLines={1}>{t.label}</Text>
+              <Text style={[local.timerText, t.done && { color: colors.warn }]}>{t.done ? 'Fertig!' : mmss(left)}</Text>
+            </View>
+            <Pressable onPress={() => stop(t.id)} style={local.timerStop} accessibilityRole="button"><Text style={styles.smallText}>{t.done ? 'OK' : 'Stopp'}</Text></Pressable>
+          </View>
+        );
+      })}
+    </View>
+  ) : null;
+
+  const main = (
+    <ScrollView style={{ flex: 1 }} contentContainerStyle={local.content}>
+      {idx < 0 ? (
+        <View style={{ gap: 10 }}>
+          <Text style={styles.sectionTitle}>Zutaten für {people}</Text>
+          {recipe.ingredients.map((ing, i) => (
+            <Text key={`${ing.name}-${i}`} style={local.ingredient}>
+              <Text style={{ color: colors.accent, fontWeight: '700' }}>{formatAmount(Math.round(ing.amount * people * 10) / 10, ing.unit)}</Text> {ing.name}
+            </Text>
+          ))}
+          {!twoCol ? <View style={{ marginTop: space.lg }}>{plan}</View> : null}
+        </View>
+      ) : (
+        <>
+          <Text style={styles.hint}>ab {hhmm(times[idx])}</Text>
+          <Text style={local.step}>{steps[idx]}</Text>
+        </>
+      )}
+      {minutes ? <Button label={`Timer ${minutes} Min. starten`} variant="secondary" icon="clock" onPress={() => start(`Schritt ${idx + 1}`, minutes)} /> : null}
+      {timerList}
+      {awake ? <Text style={[styles.hint, { fontSize: 12 }]}>Bildschirm bleibt an</Text> : null}
+    </ScrollView>
+  );
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
       <View style={local.head}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.hint} numberOfLines={1}>{recipe.name} · {people} Personen</Text>
-          <Text style={styles.h2}>{idx < 0 ? 'Zutaten bereitlegen' : `Schritt ${idx + 1} von ${steps.length}`}</Text>
+          <Text style={styles.hint} numberOfLines={1}>{recipe.name}</Text>
+          <Text style={styles.h2}>{idx < 0 ? 'Bereitlegen und Zeitplan' : `Schritt ${idx + 1} von ${steps.length}`}</Text>
         </View>
         <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Kochmodus beenden" style={local.close}>
           <Text style={local.closeText}>Schließen</Text>
@@ -99,21 +179,12 @@ export function CookMode({ recipe, people, isCooked, onDone, onClose }: {
       </View>
       <View style={local.progress}><View style={[local.progressFill, { width: `${((idx + 1) / steps.length) * 100}%` }]} /></View>
 
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={local.content}>
-        {idx < 0 ? (
-          <View style={{ gap: 10 }}>
-            {recipe.ingredients.map((ing, i) => (
-              <Text key={`${ing.name}-${i}`} style={local.ingredient}>
-                <Text style={{ color: colors.accent, fontWeight: '700' }}>{formatAmount(Math.round(ing.amount * people * 10) / 10, ing.unit)}</Text> {ing.name}
-              </Text>
-            ))}
-          </View>
-        ) : (
-          <Text style={local.step}>{steps[idx]}</Text>
-        )}
-        {minutes ? <StepTimer key={idx} minutes={minutes} /> : null}
-        {awake ? <Text style={[styles.hint, { fontSize: 12 }]}>Bildschirm bleibt an</Text> : null}
-      </ScrollView>
+      {twoCol ? (
+        <View style={{ flex: 1, flexDirection: 'row' }}>
+          <ScrollView style={local.side} contentContainerStyle={{ padding: space.lg }}>{plan}</ScrollView>
+          {main}
+        </View>
+      ) : main}
 
       <View style={local.foot}>
         {idx >= 0 ? (
@@ -139,10 +210,16 @@ const local = StyleSheet.create({
   progress: { height: 6, backgroundColor: colors.input },
   progressFill: { height: 6, backgroundColor: colors.accent },
   content: { padding: space.xl, gap: space.xl, maxWidth: 820, width: '100%', alignSelf: 'center' },
+  side: { width: 380, flexGrow: 0, borderRightWidth: 1, borderRightColor: colors.border, backgroundColor: colors.surface },
+  planHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  planRow: { flexDirection: 'row', gap: 12, paddingVertical: 8, paddingHorizontal: 8, borderRadius: 10 },
+  planNow: { backgroundColor: colors.accentSoft },
+  planTime: { width: 48, fontWeight: '700', color: colors.text, fontVariant: ['tabular-nums'] },
+  small: { minHeight: 36, paddingHorizontal: 12, borderRadius: radius.sm, backgroundColor: colors.accentSoft, justifyContent: 'center' },
   step: { fontSize: 26, lineHeight: 38, color: colors.text, fontWeight: '600' },
   ingredient: { fontSize: 20, lineHeight: 28, color: colors.text },
   timer: { flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.lg, borderRadius: radius.lg, borderWidth: 2, borderColor: colors.accent },
-  timerText: { flex: 1, fontSize: 40, fontWeight: '800', color: colors.accent, fontVariant: ['tabular-nums'] },
+  timerText: { fontSize: 40, fontWeight: '800', color: colors.accent, fontVariant: ['tabular-nums'] },
   timerStop: { minHeight: 44, paddingHorizontal: 18, borderRadius: radius.sm, backgroundColor: colors.accentSoft, justifyContent: 'center' },
   foot: { flexDirection: 'row', gap: space.sm, padding: space.lg, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.surface },
 });

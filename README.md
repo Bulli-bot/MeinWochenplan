@@ -42,6 +42,14 @@ Läuft im Browser am PC und auf dem iPhone als Symbol auf dem Home-Bildschirm. I
 - **Breite Bildschirme:** ab 1280 px Hauptspalte + Seitenspalte (Einkauf, Ausgaben, Rezepte, KI, Mehr), ab 1600 px
   die ganze Woche nebeneinander.
 
+- **Familie:** „Wer isst mit?“ (Einstellungen) – Personen mit Portion (1, ¾, ½) und Abneigungen; im Plan pro Tag
+  abhaken, wer da ist. Familien-Abstimmung (Woche → 10 Vorschläge, jede Person „will ich / egal / nein“) fließt in
+  den nächsten Plan. Wochen-Rückblick ab Freitag (gekocht, Kosten, Liebling, Übriges, Nicht-Gekochtes übernehmen).
+- **Kochen:** Kochmodus mit Zeitplan ab der Essenszeit (rückwärts gerechnet, ±5 Min.) und mehreren Timern.
+- **Mit Foto/KI:** Rezept vom Kochbuch-Foto, aus Text/Diktat oder von Seiten ohne Rezept-Daten (Instagram, TikTok,
+  YouTube: Titel + Beschreibung); Kühlschrank-Foto → Vorrat + „Daraus möglich“. Am PC lokal (PC-Helfer `/bild`),
+  unterwegs Gemini (Funktion `ki`, Modus `bild`).
+
 ## Konten, Besitzer und Abgleich
 Anmeldung mit E-Mail und Passwort (Supabase Auth). Neue Konten sind gesperrt, bis der Besitzer sie unter
 Mehr → Konto freigibt; dort kann er Konten auch sperren oder „in meinen Haushalt" holen (gemeinsame Woche).

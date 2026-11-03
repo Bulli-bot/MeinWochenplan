@@ -4,6 +4,8 @@ import { Field, Link } from '../components';
 import { formatAmount } from '../logic/shoppingList';
 import { parseIngredientLine, unpricedNames } from '../logic/customRecipe';
 import { importRecipe } from '../pchelper';
+import { pickPhoto } from '../photos';
+import { recipeFromPhoto, recipeFromText, type RawRecipe } from '../logic/vision';
 import type { Carb, CustomRecipe, Ingredient, Protein, Vibe } from '../types';
 import { Button, Chip, styles } from '../ui';
 
@@ -32,6 +34,38 @@ export function RecipeEditScreen({ initial, onSave, onCancel }: {
 
   const parsed: Ingredient[] = ingredients.split('\n').map((l) => parseIngredientLine(l, Number(portions) || 1)).filter((x): x is Ingredient => !!x);
   const missing = unpricedNames(parsed);
+
+  const [text, setText] = useState('');
+  const [textOpen, setTextOpen] = useState(false);
+  const fill = (r: RawRecipe, how: string) => {
+    setName(r.name);
+    setMinutes(String(r.minuten ?? 30));
+    setPortions(String(r.portionen ?? 4));
+    setIngredients(r.zutaten.join('\n'));
+    setSteps(r.schritte.join('\n'));
+    setMsg({ text: `${how} (${r.portionen ?? 4} Portionen). Bitte Zutaten kurz prüfen.` });
+  };
+  const run = async (job: () => Promise<void>) => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await job();
+    } catch (e) {
+      setMsg({ text: (e as Error).message, error: true });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const fromPhoto = () => run(async () => {
+    const image = await pickPhoto('bon');
+    if (!image) return;
+    setMsg({ text: 'Lese das Rezept vom Foto … das dauert bis zu einer Minute.' });
+    fill(await recipeFromPhoto(image), 'Vom Foto übernommen');
+  });
+  const fromText = () => run(async () => {
+    if (text.trim().length < 20) throw new Error('Bitte erst den Rezepttext einfügen oder diktieren.');
+    fill(await recipeFromText(text), 'Aus dem Text übernommen');
+  });
 
   const doImport = async () => {
     if (!source.trim()) return setMsg({ text: 'Erst den Link zum Rezept eintragen.', error: true });
@@ -79,6 +113,18 @@ export function RecipeEditScreen({ initial, onSave, onCancel }: {
       <View style={[styles.card, { gap: 10 }]}>
         <Field label="Link zum Rezept (optional, z. B. Chefkoch)" value={source} onChangeText={setSource} autoCapitalize="none" autoCorrect={false} placeholder="https://www.chefkoch.de/rezepte/…" />
         <Button label={busy ? 'Hole Rezept …' : 'Vom Link übernehmen (nur am PC)'} variant="secondary" onPress={() => (busy ? null : doImport())} />
+        <Text style={styles.hint}>Geht mit Chefkoch und Blogs; bei Instagram, TikTok und YouTube liest die KI Titel und Beschreibung. Klappt das nicht: Beschreibung kopieren und unten als Text einfügen.</Text>
+        <View style={styles.row}>
+          <View style={{ flex: 1, minWidth: 150 }}><Button label="Foto vom Rezept" icon="camera" variant="secondary" onPress={() => (busy ? null : fromPhoto())} /></View>
+          <View style={{ flex: 1, minWidth: 150 }}><Button label="Text oder diktieren" icon="mic" variant="secondary" onPress={() => setTextOpen(!textOpen)} /></View>
+        </View>
+        {textOpen ? (
+          <>
+            <Field label="Rezept als Text – einfügen, abtippen oder mit dem Mikrofon der Tastatur diktieren" value={text} onChangeText={setText} multiline
+              placeholder="z. B. „Für 4: 500 g Nudeln, 2 Zucchini, 200 g Feta … Zucchini anbraten, …“" />
+            <Button label={busy ? 'KI liest …' : 'Daraus ein Rezept machen'} onPress={() => (busy ? null : fromText())} />
+          </>
+        ) : null}
       </View>
       {msg ? <Text style={msg.error ? styles.error : styles.hint}>{msg.text}</Text> : null}
 

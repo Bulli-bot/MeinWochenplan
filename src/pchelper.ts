@@ -49,3 +49,6 @@ export interface ChatMessage {
 }
 export const helperChat = (body: { system: string; messages: ChatMessage[]; json?: boolean }) =>
   call<{ text: string; model: string }>('/ai', body, 180000);
+
+/** Foto mit eigener Frage lesen (Bildmodell) – Antwort als JSON-Text */
+export const helperImage = (image: string, prompt: string) => call<{ text: string; model: string }>('/bild', { image, prompt }, 180000);

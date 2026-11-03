@@ -36,7 +36,7 @@ Deno.serve(async (req) => {
   const key = Deno.env.get('GEMINI_API_KEY');
   if (!key) return json(503, { error: 'Gemini ist noch nicht eingerichtet (Secret GEMINI_API_KEY fehlt).' });
 
-  let body: { mode?: 'chat' | 'bon'; system?: string; messages?: Msg[]; json?: boolean; image?: string };
+  let body: { mode?: 'chat' | 'bon' | 'bild'; system?: string; messages?: Msg[]; json?: boolean; image?: string; prompt?: string };
   try {
     body = await req.json();
   } catch {
@@ -45,13 +45,14 @@ Deno.serve(async (req) => {
 
   const model = Deno.env.get('GEMINI_MODEL') || 'gemini-2.5-flash';
   let payload: Record<string, unknown>;
-  if (body.mode === 'bon') {
+  // „bon“: Kassenbon; „bild“: beliebiges Foto mit eigener Frage (Rezept vom Kochbuch, Kühlschrank) – Antwort als JSON-Text
+  if (body.mode === 'bon' || body.mode === 'bild') {
     const image = String(body.image ?? '');
     if (image.length > 6_000_000) return json(413, { error: 'Foto zu groß' });
     const m = image.match(/^data:([^;]+);base64,(.*)$/);
     if (!m) return json(400, { error: 'Kein Bild' });
     payload = {
-      contents: [{ role: 'user', parts: [{ text: BON_PROMPT }, { inline_data: { mime_type: m[1], data: m[2] } }] }],
+      contents: [{ role: 'user', parts: [{ text: body.mode === 'bild' ? String(body.prompt ?? '').slice(0, 4000) : BON_PROMPT }, { inline_data: { mime_type: m[1], data: m[2] } }] }],
       generationConfig: { temperature: 0, responseMimeType: 'application/json' },
     };
   } else {

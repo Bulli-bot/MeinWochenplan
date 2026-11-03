@@ -1,11 +1,14 @@
 import { useState, type ReactNode } from 'react';
 import { ScrollView, Text } from 'react-native';
+import { Pressable, View } from 'react-native';
+import { defaultMembers } from '../logic/people';
+import type { Member } from '../types';
 import type { Allergen, Basic, Carb, Diet, Equipment, Protein, Settings, StoreLevel, Vibe, Weekday } from '../types';
 import { Field } from '../components';
 import { CalendarCard } from './CalendarCard';
 import { BASICS } from '../logic/shoppingList';
 import { DEFAULT_SETTINGS } from '../storage';
-import { Button, Chip, Section, Stepper, Toggle, WEEKDAYS, euro, styles } from '../ui';
+import { Button, Chip, Icon, Section, Stepper, Toggle, WEEKDAYS, colors, euro, styles } from '../ui';
 
 const DIETS: [Diet, string][] = [['alles', 'Alles'], ['pescetarisch', 'Pescetarisch'], ['vegetarisch', 'Vegetarisch'], ['vegan', 'Vegan']];
 const ALLERGENS: [Allergen, string][] = [
@@ -22,6 +25,7 @@ const PROTEINS: [Protein, string][] = [
 const SIDES: [Carb, string][] = [['kartoffeln', 'Kartoffeln'], ['nudeln', 'Nudeln'], ['reis', 'Reis'], ['brot', 'Brot']];
 const STORES: [StoreLevel, string][] = [['discounter', 'Discounter (günstig)'], ['supermarkt', 'Supermarkt (Standard)'], ['mix', 'Angebote/Mix']];
 const MINUTES = [20, 30, 45, 90];
+const PORTIONS: [number, string][] = [[1, '1'], [0.75, '¾'], [0.5, '½']];
 const minutesLabel = (m: number) => (m === 90 ? 'egal' : `${m} Min.`);
 
 function toggle<T>(list: T[], value: T): T[] {
@@ -47,9 +51,14 @@ export function SettingsScreen({ initial, isFirstRun, onSave, onSaveOnly, error,
   }));
   const set = (patch: Partial<Settings>) => setS((prev) => ({ ...prev, ...patch }));
   const [kidsText, setKidsText] = useState((initial.kids ?? []).join(', '));
+  const members = s.members ?? [];
+  const setMember = (i: number, patch: Partial<Member>) => set({ members: members.map((m, j) => (j === i ? { ...m, ...patch } : m)) });
   const final = (): Settings => ({
     ...s,
     kids: kidsText.split(',').map((k) => k.trim()).filter(Boolean),
+    // Namenlose Einträge weglassen; mit Mitgliedern zählt der Haushalt nach Köpfen
+    members: members.filter((m) => m.name.trim()).map((m) => ({ ...m, name: m.name.trim() })),
+    ...(members.some((m) => m.name.trim()) ? { householdSize: members.filter((m) => m.name.trim()).length } : {}),
     // Für alte Stellen, die nur eine Kochzeit kennen
     maxMinutes: Math.max(s.maxMinutesWeekday ?? s.maxMinutes, s.maxMinutesWeekend ?? s.maxMinutes),
   });
@@ -73,6 +82,31 @@ export function SettingsScreen({ initial, isFirstRun, onSave, onSaveOnly, error,
       <Section title="Kinder" hint="Namen mit Komma getrennt – für die Daumen-Bewertung nach dem Essen.">
         <Field label="" value={kidsText} onChangeText={setKidsText} placeholder="z. B. Mia, Ben" style={{ minWidth: 260 }} />
       </Section>
+
+      <View style={[styles.card, { gap: 10 }]}>
+        <Text style={styles.sectionTitle}>Wer isst mit?</Text>
+        <Text style={styles.hint}>Portion und Abneigungen pro Person. Im Plan lässt sich pro Tag abhaken, wer da ist – Mengen und Preise rechnen dann genau.</Text>
+        {members.length ? members.map((m, i) => (
+          <View key={i} style={{ gap: 6, paddingTop: 8, borderTopWidth: i ? 1 : 0, borderTopColor: colors.border }}>
+            <View style={styles.row}>
+              <View style={{ flex: 1, minWidth: 160 }}><Field label="" value={m.name} onChangeText={(t) => setMember(i, { name: t })} placeholder="Name" /></View>
+              {PORTIONS.map(([v, label]) => <Chip key={v} label={label} selected={m.portion === v} onPress={() => setMember(i, { portion: v })} />)}
+              <Pressable onPress={() => set({ members: members.filter((_, j) => j !== i) })} accessibilityLabel={`${m.name} entfernen`} style={{ padding: 8 }}>
+                <Icon name="x" size={16} color={colors.muted} />
+              </Pressable>
+            </View>
+            <Field label="Mag nicht (mit Komma)" value={m.dislikes.join(', ')} onChangeText={(t) => setMember(i, { dislikes: t.split(',').map((x) => x.trim()).filter(Boolean) })} placeholder="z. B. Pilze, Fisch" />
+          </View>
+        )) : null}
+        <View style={styles.row}>
+          {members.length ? (
+            <Button label="Person dazu" variant="secondary" icon="user-plus" onPress={() => set({ members: [...members, { name: '', portion: 1, dislikes: [] }] })} />
+          ) : (
+            <Button label="Personen einzeln festlegen" variant="secondary" icon="users"
+              onPress={() => set({ members: defaultMembers(s.householdSize, kidsText.split(',').map((k) => k.trim()).filter(Boolean), '') })} />
+          )}
+        </View>
+      </View>
 
       <Section title="Wochenbudget" hint="Für alle Hauptgerichte zusammen.">
         <Stepper value={s.weeklyBudget} step={5} min={10} max={250} label={euro(s.weeklyBudget)} onChange={(v) => set({ weeklyBudget: v })} />

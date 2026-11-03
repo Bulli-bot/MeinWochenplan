@@ -65,6 +65,8 @@ export interface Settings {
   shopRhythm?: 'einmal' | 'zweimal';
   /** Neue Pläne ab Freitag gelten für die kommende Woche (Standard) oder immer für die laufende */
   planWeek?: 'kommend' | 'laufend';
+  /** Wer im Haushalt mitisst (Portionen, Abneigungen); leer = nur Haushaltsgröße */
+  members?: Member[];
   /** Einkaufstage für die Kalender-Erinnerung */
   shopDays?: Weekday[];
   /** Uhrzeit des Einkaufs (volle Stunde), Standard 10 */
@@ -82,6 +84,27 @@ export interface PlanSlot {
   kind?: 'reste' | 'restetag';
   /** Personen an diesem Tag, wenn abweichend vom Haushalt (z. B. Gäste) */
   guests?: number;
+  /** Mitglieder, die an diesem Tag nicht mitessen */
+  absent?: string[];
+}
+
+export type VoteChoice = 1 | 0 | -1;
+
+export interface FamilyVote {
+  id: string;
+  created: string;
+  /** Rezept-IDs zur Auswahl */
+  suggestions: string[];
+  /** Person → Rezept-ID → will ich (1) / egal (0) / nein (−1) */
+  ballots: Record<string, Record<string, VoteChoice>>;
+}
+
+export interface Member {
+  name: string;
+  /** 1 = Erwachsene/r, 0.75 / 0.5 für Kinder */
+  portion: number;
+  /** z. B. „Pilze“, „Fisch“ – solche Gerichte kommen seltener */
+  dislikes: string[];
 }
 
 export interface MealPlan {
@@ -132,6 +155,10 @@ export interface AppState {
   shopSplit?: boolean;
   /** Artikel, die regelmäßig von selbst auf die Liste kommen */
   recurring?: RecurringItem[];
+  /** Nicht gekochte Gerichte, die in den nächsten Plan sollen */
+  carryOver?: string[];
+  /** Familien-Abstimmung für den nächsten Plan */
+  vote?: FamilyVote;
   /** Wunschessen: Kind → Rezept-ID (für den nächsten Plan) */
   kidWishes?: Record<string, string>;
   /** Auszug für das Kalender-Abo (wird von der App geschrieben, vom Server gelesen) */

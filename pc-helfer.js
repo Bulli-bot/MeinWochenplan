@@ -2,6 +2,7 @@
 //   POST /bon     { image: "data:image/jpeg;base64,…" }  → Kassenbon mit lokalem Ollama-Bildmodell auslesen
 //   POST /import  { url: "https://…" }                   → Rezept (schema.org/Recipe) von einer Webseite holen
 //   POST /ai      { system, messages: [{role, content}], json? } → Antwort vom lokalen Textmodell (KI-Assistent)
+//   POST /bild    { image, prompt }                      → Foto mit dem Bildmodell lesen (Rezept, Kühlschrank), Antwort als JSON-Text
 //   GET  /status                                          → läuft? welches Bildmodell?
 // Start: Doppelklick auf "PC-Helfer starten.cmd" oder `node pc-helfer.js`.
 const http = require('http');
@@ -92,6 +93,48 @@ async function readReceipt(image) {
   return { model: model.name, laden: String(data.laden || ''), datum: String(data.datum || ''), summe: num(data.summe) || null, artikel };
 }
 
+/** Beliebiges Foto mit eigener Frage lesen – Antwort als JSON-Text (Rezept vom Kochbuch, Kühlschrank-Inhalt). */
+async function readImage(image, prompt) {
+  const model = await findVisionModel();
+  if (!model) throw Object.assign(new Error('Kein Bildmodell in Ollama gefunden (z. B. qwen2.5vl).'), { status: 503 });
+  const res = await fetch(`${OLLAMA}/api/chat`, {
+    method: 'POST',
+    body: JSON.stringify({
+      model: model.name,
+      stream: false,
+      format: 'json',
+      ...(model.thinking ? { think: false } : {}),
+      options: { temperature: 0.1, num_ctx: 16384, num_predict: 3000 },
+      messages: [{ role: 'user', content: String(prompt || '').slice(0, 4000), images: [String(image).replace(/^data:[^,]+,/, '')] }],
+    }),
+  });
+  if (!res.ok) throw new Error(`Ollama antwortet mit ${res.status}`);
+  return { text: (await res.json()).message.content, model: model.name };
+}
+
+const RECIPE_FROM_TEXT = `Aus dem folgenden Text (Webseite, Video-Beschreibung oder Notiz) ein Rezept machen. Antworte nur mit JSON:
+{"name":"","portionen":4,"minuten":30,"zutaten":["500 g Spaghetti","1 Zwiebel"],"schritte":["…"]}
+Zutaten mit Menge und Einheit auf Deutsch, Schritte kurz. Steht kein Rezept im Text, antworte {"name":""}.`;
+
+/** Seiten ohne schema.org-Rezept (Instagram, TikTok, YouTube, Blogs): Titel, Beschreibung und Text an das Textmodell */
+async function recipeFromPage(url, html) {
+  const meta = (p) => (html.match(new RegExp(`<meta[^>]+(?:property|name)=["']${p}["'][^>]+content=["']([^"']*)["']`, 'i')) || [])[1] || '';
+  const text = html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ');
+  const input = [meta('og:title'), meta('og:description') || meta('description'), text.slice(0, 6000)].filter(Boolean).join(' | ');
+  if (input.length < 40) throw Object.assign(new Error('Die Seite gibt ohne Anmeldung nichts preis – Beschreibung kopieren und als Text einfügen.'), { status: 422 });
+  const { text: out } = await chat({ system: RECIPE_FROM_TEXT, messages: [{ role: 'user', content: input }], json: true });
+  const r = JSON.parse(out);
+  if (!r.name || !(r.zutaten || []).length) throw Object.assign(new Error('Auf der Seite wurde kein Rezept gefunden – Beschreibung kopieren und als Text einfügen.'), { status: 422 });
+  return {
+    name: String(r.name).trim(),
+    portions: parseInt(r.portionen, 10) || 4,
+    ingredients: r.zutaten.map((s) => String(s).trim()),
+    steps: (r.schritte || []).map((s) => String(s).trim()),
+    minutes: parseInt(r.minuten, 10) || 30,
+    source: url,
+  };
+}
+
 function isPublicUrl(raw) {
   try {
     const u = new URL(raw);
@@ -139,7 +182,8 @@ async function importRecipe(url) {
       source: url,
     };
   }
-  throw Object.assign(new Error('Auf der Seite wurde kein Rezept gefunden.'), { status: 422 });
+  // Kein Rezept-Baustein auf der Seite → KI liest Titel, Beschreibung und Text
+  return recipeFromPage(url, html);
 }
 
 function send(res, status, body) {
@@ -193,6 +237,10 @@ http
       if (req.method === 'POST' && path === '/bon') return send(res, 200, await readReceipt((await readBody(req)).image));
       if (req.method === 'POST' && path === '/ai') return send(res, 200, await chat(await readBody(req)));
       if (req.method === 'POST' && path === '/import') return send(res, 200, await importRecipe((await readBody(req)).url));
+      if (req.method === 'POST' && path === '/bild') {
+        const b = await readBody(req);
+        return send(res, 200, await readImage(b.image, b.prompt));
+      }
       send(res, 404, { error: 'Unbekannt' });
     } catch (e) {
       const offline = e.cause && e.cause.code === 'ECONNREFUSED';

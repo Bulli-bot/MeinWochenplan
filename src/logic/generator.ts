@@ -2,6 +2,7 @@ import { RECIPES } from '../data/recipes';
 import type { Diet, KidVote, MealPlan, PantryItem, PlanSlot, Protein, Recipe, Settings, Weekday } from '../types';
 import { seasonalIngredients } from '../data/season';
 import { useSoon } from './leftovers';
+import { dislikedBy, slotPeople } from './people';
 
 export interface PlanContext {
   settings: Settings;
@@ -12,6 +13,8 @@ export interface PlanContext {
   pantry?: PantryItem[];
   /** Wunschessen der Kinder (Rezept-IDs) – kommen in den nächsten Plan, wenn Budget und Einstellungen passen */
   wishes?: string[];
+  /** Ergebnis der Familien-Abstimmung: Rezept-ID → Ja minus Nein */
+  votes?: Record<string, number>;
 }
 
 /** Daumen der Kinder (nur aktuell eingetragene Kinder zählen). */
@@ -97,6 +100,11 @@ function baseScore(recipe: Recipe, ctx: PlanContext): number {
   // Saisonales Gemüse/Obst: frischer und meist günstiger
   score += Math.min(seasonalIngredients(recipe).length, 2) * 0.8;
   if (ctx.wishes?.includes(recipe.id)) score += 50;
+  // Abstimmung: jede Ja-Stimme zählt viel, ein klarer Gewinner (mind. 2 netto) landet sicher im Plan
+  const v = ctx.votes?.[recipe.id] ?? 0;
+  score += v >= 2 ? 30 + v * 3 : v * 3;
+  // Abneigungen einzelner Mitglieder: kommt seltener, fliegt aber nicht ganz raus
+  score -= dislikedBy(recipe).length * 3;
   return score;
 }
 
@@ -255,7 +263,7 @@ export function findSwap(plan: MealPlan, day: number, ctx: PlanContext, skip: st
   const others = othersSlots.filter((s) => s.kind !== 'reste').map((s) => byId.get(s.recipeId)).filter((r): r is Recipe => !!r);
   const othersCost = othersSlots.reduce((sum, s) => {
     const r = byId.get(s.recipeId);
-    return sum + (r ? portionCost(r, s.guests ?? householdSize) : 0);
+    return sum + (r ? portionCost(r, slotPeople(s, householdSize)) : 0);
   }, 0);
   const weight = 1 + plan.slots.filter((s) => s.kind === 'reste' && s.recipeId === current && s.day !== day).length;
 
@@ -283,5 +291,5 @@ export function costWithSwap(plan: MealPlan, day: number, recipe: Recipe, househ
 }
 
 export function planCost(plan: MealPlan, householdSize: number, recipes: Record<string, Recipe>): number {
-  return plan.slots.reduce((sum, s) => sum + (recipes[s.recipeId] ? portionCost(recipes[s.recipeId], s.guests ?? householdSize) : 0), 0);
+  return plan.slots.reduce((sum, s) => sum + (recipes[s.recipeId] ? portionCost(recipes[s.recipeId], slotPeople(s, householdSize)) : 0), 0);
 }

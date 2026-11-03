@@ -4,8 +4,10 @@ import { Field, Link } from '../components';
 import { knownIngredients } from '../data/recipes';
 import { mergeGrundausstattung, missingGrundausstattung } from '../data/grundausstattung';
 import { daysToUseBy, useByIn } from '../logic/leftovers';
+import { fridgeFromPhoto, type FridgeItem } from '../logic/vision';
+import { pickPhoto } from '../photos';
 import { currentAmount, dueSoon, emptyOn } from '../logic/pantry';
-import type { PantryItem, PantryKind } from '../types';
+import type { PantryItem, PantryKind, Recipe } from '../types';
 import { Button, Card, Chip, Icon, Stepper, colors, hov, space, styles } from '../ui';
 
 const UNITS = ['g', 'ml', 'Stück', 'Flaschen', 'Packungen', 'Rollen', 'Dosen', 'Kisten'];
@@ -121,7 +123,7 @@ function ItemForm({ initial, names, onSave, onCancel }: {
 }
 
 /** Vorrat: Lebensmittel fliegen von der Einkaufsliste; mit Verbrauch pro Tag erinnert die App, bevor etwas leer ist. */
-export function PantryScreen({ pantry, onChange, onRemove, onBack, onToShopping }: {
+export function PantryScreen({ pantry, onChange, onRemove, onBack, onToShopping, cookable, onOpenRecipe }: {
   pantry: PantryItem[];
   onChange: (p: PantryItem[]) => void;
   /** Löschen mit „Rückgängig“ */
@@ -129,7 +131,40 @@ export function PantryScreen({ pantry, onChange, onRemove, onBack, onToShopping 
   onBack: () => void;
   /** Bald leer → auf die eigene Einkaufsliste */
   onToShopping: (name: string) => void;
+  /** Was sich aus diesem Vorrat kochen lässt */
+  cookable: (pantry: PantryItem[]) => { recipe: Recipe; missing: string[] }[];
+  onOpenRecipe: (id: string) => void;
 }) {
+  const [fridge, setFridge] = useState<(FridgeItem & { on: boolean })[] | null>(null);
+  const [fridgeBusy, setFridgeBusy] = useState(false);
+  const [ideas, setIdeas] = useState<{ recipe: Recipe; missing: string[] }[] | null>(null);
+  const scanFridge = async () => {
+    setFridgeBusy(true);
+    setMsg(null);
+    setIdeas(null);
+    try {
+      const image = await pickPhoto('bon');
+      if (!image) return;
+      setMsg('Schaue in den Kühlschrank … das dauert bis zu einer Minute.');
+      const found = await fridgeFromPhoto(image);
+      setFridge(found.map((f) => ({ ...f, on: f.sicher })));
+      setMsg(found.length ? `${found.length} Lebensmittel erkannt – Unsicheres ist abgewählt.` : 'Nichts erkannt – bitte mit mehr Licht noch einmal.');
+    } catch (e) {
+      setMsg((e as Error).message);
+    } finally {
+      setFridgeBusy(false);
+    }
+  };
+  const takeFridge = () => {
+    if (!fridge) return;
+    const have = new Set(pantry.map((p) => p.name.toLowerCase()));
+    const added = fridge.filter((f) => f.on && !have.has(f.name.toLowerCase())).map((f): PantryItem => ({ name: f.name, kind: guessKind(f.name), since: new Date().toISOString() }));
+    const next = [...pantry, ...added];
+    onChange(next);
+    setFridge(null);
+    setIdeas(cookable(next));
+    setMsg(`${added.length} neu im Vorrat${fridge.filter((f) => f.on).length - added.length ? `, ${fridge.filter((f) => f.on).length - added.length} waren schon da` : ''}.`);
+  };
   /** Aufgeklappter Artikel – „soon:…“ = im Kasten „Bald leer“, sonst in der Liste */
   const [open, setOpen] = useState<string | null>(null);
   const [filter, setFilter] = useState<PantryKind | 'alle'>('alle');
@@ -154,6 +189,40 @@ export function PantryScreen({ pantry, onChange, onRemove, onBack, onToShopping 
       <Link label="‹ Mehr" onPress={onBack} />
       <Text style={styles.h1}>Vorrat</Text>
       <Text style={styles.sub}>Lebensmittel, Getränke, Drogerie und Haushalt. Mit Verbrauch rechnet die App mit und erinnert dich, bevor etwas leer ist.</Text>
+
+      <Card style={{ gap: space.sm }}>
+        <View style={styles.row}><Icon name="camera" color={colors.accent} /><Text style={styles.sectionTitle}>Kühlschrank-Foto</Text></View>
+        <Text style={styles.hint}>Kühlschrank oder Vorratsschrank fotografieren – die KI erkennt, was da ist, und schlägt vor, was du daraus kochen kannst.</Text>
+        {fridge ? (
+          <>
+            <View style={styles.chipRow}>
+              {fridge.map((f, i) => (
+                <Chip key={`${f.name}-${i}`} icon={f.on ? 'check' : 'help-circle'} label={`${f.name}${f.menge ? ` · ${f.menge}` : ''}${f.sicher ? '' : '?'}`} selected={f.on}
+                  onPress={() => setFridge(fridge.map((x, j) => (j === i ? { ...x, on: !x.on } : x)))} />
+              ))}
+            </View>
+            <View style={styles.row}>
+              <View style={{ flex: 2, minWidth: 160 }}><Button label={`${fridge.filter((f) => f.on).length} in den Vorrat`} icon="check" onPress={takeFridge} /></View>
+              <View style={{ flex: 1, minWidth: 120 }}><Button label="Verwerfen" variant="ghost" onPress={() => setFridge(null)} /></View>
+            </View>
+          </>
+        ) : (
+          <Button label={fridgeBusy ? 'Schaue nach …' : 'Foto machen'} variant="secondary" icon="camera" onPress={() => (fridgeBusy ? null : scanFridge())} />
+        )}
+        {ideas ? (
+          ideas.length ? (
+            <View style={{ gap: 4 }}>
+              <Text style={[styles.hint, { fontWeight: '700', color: colors.text }]}>Daraus möglich</Text>
+              {ideas.map(({ recipe, missing }) => (
+                <Pressable key={recipe.id} onPress={() => onOpenRecipe(recipe.id)} style={(s) => [local.soonRow, hov(s) && { opacity: 0.85 }]}>
+                  <Text style={[styles.hint, { flex: 1, color: colors.text }]}>{recipe.name}</Text>
+                  <Text style={[styles.hint, { color: missing.length ? colors.warn : colors.accent }]}>{missing.length ? `fehlt: ${missing.join(', ')}` : 'alles da'}</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : <Text style={styles.hint}>Für ein ganzes Gericht fehlt noch zu viel.</Text>
+        ) : null}
+      </Card>
 
       {missingGrundausstattung(pantry) > 0 ? (
         <Card style={{ gap: space.sm, borderColor: colors.accent }}>

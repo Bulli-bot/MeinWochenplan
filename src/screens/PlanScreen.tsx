@@ -4,9 +4,10 @@ import { Cover, Field } from '../components';
 import { RECIPE_BY_ID } from '../data/recipes';
 import { addDays, isoDay, isoWeek, mondayOf, planMonday, shortDate, slotDate, todayIndex, todayInPlan } from '../logic/dates';
 import { planCost, portionCost } from '../logic/generator';
-import type { MealPlan, PhotoRef } from '../types';
+import type { MealPlan, PhotoRef, FamilyVote } from '../types';
 import { seasonalIngredients } from '../data/season';
 import { weekBalance } from '../logic/balance';
+import { dislikedBy, fmtPeople, getMembers, slotPeople } from '../logic/people';
 import { Button, Card, Chip, Eyebrow, Grid, Icon, Tag, WEEKDAYS, WEEKDAYS_LONG, colors, euro, hov, space, styles, useLayout } from '../ui';
 
 export { todayIndex };
@@ -126,7 +127,7 @@ function MonthView({ plans, startAt, onOpen }: { plans: MealPlan[]; startAt: Dat
 
 export function PlanScreen({
   plan, isActive, nav, allPlans, savedPlans, householdSize, budget, favourites, cooked, photos, kidInfo, error,
-  onOpen, onSwap, onChoose, onMove, onGuests, wishes, onRegenerate, onPlanNext, onSaveWeek, onReuse, onUnsave, footer,
+  onOpen, onSwap, onChoose, onMove, onGuests, onAbsent, wishes, vote, onVote, onReview, onRegenerate, onPlanNext, onSaveWeek, onReuse, onUnsave, footer,
 }: {
   /** Angezeigte Woche */
   plan: MealPlan;
@@ -149,8 +150,14 @@ export function PlanScreen({
   onMove: (from: number, to: number) => void;
   /** Personen an einem Tag (undefined = wie Haushalt) */
   onGuests: (day: number, guests: number | undefined) => void;
+  /** Mitglied isst an diesem Tag (nicht) mit */
+  onAbsent: (day: number, name: string) => void;
   /** Wunschessen der Kinder: Kind → Rezept-ID */
   wishes: Record<string, string>;
+  /** Laufende Familien-Abstimmung */
+  vote: FamilyVote | undefined;
+  onVote: () => void;
+  onReview: () => void;
   onRegenerate: () => void;
   /** Gesetzt, wenn schon die kommende Woche dran ist, aber noch kein Plan dafür existiert */
   onPlanNext?: { label: string; run: () => void };
@@ -233,6 +240,31 @@ export function PlanScreen({
             );
           })()}
 
+          {/* Ab Freitag oder für vergangene Wochen: Rückblick */}
+          {!isActive || (todayInPlan(plan) ?? 0) >= 4 ? (
+            <Card onPress={onReview} style={{ gap: 4 }}>
+              <View style={styles.row}>
+                <Icon name="award" color={colors.warn} />
+                <Text style={[styles.sectionTitle, { flex: 1 }]}>Wochen-Rückblick</Text>
+                <Icon name="chevron-right" color={colors.muted} />
+              </View>
+              <Text style={styles.hint}>Was gekocht wurde, was es gekostet hat, was übrig ist.</Text>
+            </Card>
+          ) : null}
+
+          {isActive ? (
+            <Card onPress={onVote} style={{ gap: 4 }}>
+              <View style={styles.row}>
+                <Icon name="check-square" color={colors.accent} />
+                <Text style={[styles.sectionTitle, { flex: 1 }]}>Familien-Abstimmung</Text>
+                <Icon name="chevron-right" color={colors.muted} />
+              </View>
+              <Text style={styles.hint}>
+                {vote ? `Läuft · ${Object.keys(vote.ballots).length} haben abgestimmt – Ergebnis fließt in den nächsten Plan` : 'Alle wählen aus 10 Vorschlägen, was nächste Woche auf den Tisch kommt.'}
+              </Text>
+            </Card>
+          ) : null}
+
           {moving !== null ? (
             <Card style={{ borderColor: colors.accent, gap: space.sm }}>
               <Text style={styles.sectionTitle}>{WEEKDAYS_LONG[moving]} verschieben</Text>
@@ -265,7 +297,8 @@ export function PlanScreen({
               const isCooked = cooked.includes(r.id);
               const isReste = slot.kind === 'reste';
               const source = isReste ? plan.slots.find((x) => x.recipeId === r.id && !x.kind) : undefined;
-              const people = slot.guests ?? householdSize;
+              const people = slotPeople(slot, householdSize);
+              const disliked = dislikedBy(r);
               // Gekochte Tage (außer heute) kompakt und blasser – die kommenden stechen hervor
               const compact = isCooked && !isToday;
               return (
@@ -281,24 +314,33 @@ export function PlanScreen({
                   <View style={styles.row}>
                     {isReste ? <Tag label="Reste vom Vortag" tone="info" icon="refresh-ccw" />
                       : isCooked ? <Tag label="Gekocht" tone="accent" icon="check" /> : <Tag label={`${r.minutes} Min.`} tone="info" icon="clock" />}
-                    {!isReste ? <Tag label={euro(portionCost(r, householdSize) * (plan.slots.some((s) => s.kind === 'reste' && s.recipeId === r.id) ? 2 : 1))} icon="tag" /> : null}
+                    {!isReste ? <Tag label={euro(portionCost(r, people) * (plan.slots.some((s) => s.kind === 'reste' && s.recipeId === r.id) ? 2 : 1))} icon="tag" /> : null}
                     {kids.up ? <Tag label={`${kids.up}`} tone="accent" icon="thumbs-up" /> : null}
                     {kids.down ? <Tag label={`${kids.down}`} tone="danger" icon="thumbs-down" /> : null}
                     {!isReste && !compact && seasonalIngredients(r).length ? <Tag label="Saison" tone="accent" icon="sun" /> : null}
                     {!isReste && isActive ? (
                       <Pressable onPress={() => setGuestDay(guestDay === slot.day ? null : slot.day)} accessibilityRole="button" accessibilityLabel={`Personen am ${WEEKDAYS_LONG[slot.day]}: ${people}`}>
-                        <Tag label={`${people}`} tone={slot.guests ? 'warn' : 'muted'} icon="users" />
+                        <Tag label={fmtPeople(people)} tone={slot.guests || slot.absent?.length ? 'warn' : 'muted'} icon="users" />
                       </Pressable>
                     ) : null}
                   </View>
+                  {disliked.length && !compact ? <Text style={[styles.hint, { color: colors.warn }]}>Mag nicht: {disliked.join(', ')}</Text> : null}
+                  {guestDay === slot.day && getMembers().length ? (
+                    <View style={styles.chipRow}>
+                      {getMembers().map((m) => (
+                        <Chip key={m.name} icon={slot.absent?.includes(m.name) ? 'user-x' : 'user-check'} label={m.name}
+                          selected={!slot.absent?.includes(m.name)} onPress={() => onAbsent(slot.day, m.name)} />
+                      ))}
+                    </View>
+                  ) : null}
                   {guestDay === slot.day ? (
                     <View style={local.guestRow}>
-                      <Text style={[styles.hint, { flex: 1 }]}>Personen{slot.guests ? ' (mit Gästen)' : ''}</Text>
-                      <Pressable onPress={() => onGuests(slot.day, people - 1 === householdSize ? undefined : Math.max(1, people - 1))} style={local.stepBtn} accessibilityLabel="Eine Person weniger">
+                      <Text style={[styles.hint, { flex: 1 }]}>{slot.guests ? 'Personen (mit Gästen)' : 'Gäste dazu?'}</Text>
+                      <Pressable onPress={() => onGuests(slot.day, slot.guests && slot.guests - 1 > slotPeople({ absent: slot.absent }, householdSize) ? slot.guests - 1 : undefined)} style={local.stepBtn} accessibilityLabel="Eine Person weniger">
                         <Icon name="minus" size={14} color={colors.text} />
                       </Pressable>
-                      <Text style={[styles.sectionTitle, { minWidth: 20, textAlign: 'center' }]}>{people}</Text>
-                      <Pressable onPress={() => onGuests(slot.day, people + 1 === householdSize ? undefined : Math.min(20, people + 1))} style={local.stepBtn} accessibilityLabel="Eine Person mehr">
+                      <Text style={[styles.sectionTitle, { minWidth: 20, textAlign: 'center' }]}>{fmtPeople(people)}</Text>
+                      <Pressable onPress={() => onGuests(slot.day, Math.min(20, Math.ceil(people) + 1))} style={local.stepBtn} accessibilityLabel="Eine Person mehr">
                         <Icon name="plus" size={14} color={colors.text} />
                       </Pressable>
                     </View>

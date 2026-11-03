@@ -7,10 +7,15 @@ import { deleteCloudPhoto, uploadPhoto, useCloudSync } from './src/cloud';
 import { priceLevelFor } from './src/data/prices';
 import { BUILTIN_IDS, RECIPE_BY_ID, rebuildCatalog } from './src/data/recipes';
 import { budgetWeekKey, isoWeek, parseDay, planWeekKey, targetWeekStart, todayInPlan, weekRelation } from './src/logic/dates';
-import { findSwap, generatePlan, kidTally, planCost, type PlanContext } from './src/logic/generator';
+import { eligibleRecipes, findSwap, generatePlan, kidTally, planCost, type PlanContext } from './src/logic/generator';
 import { buildCalendarFeed, sameFeed } from './src/logic/calendar';
 import { applyRecurring, setRecurring } from './src/logic/recurring';
 import { applyAutoList, applyReceipt, consumeCooked } from './src/logic/automations';
+import { setMembers, slotPeople } from './src/logic/people';
+import { newVote, voteScores } from './src/logic/vote';
+import { cookableNow } from './src/logic/vision';
+import { VoteScreen } from './src/screens/VoteScreen';
+import { ReviewScreen } from './src/screens/ReviewScreen';
 import { deletePhotoData, newPhotoId, pickPhoto, savePhotoData } from './src/photos';
 import { AccountScreen } from './src/screens/AccountScreen';
 import { AiScreen } from './src/screens/AiScreen';
@@ -74,6 +79,10 @@ export default function App() {
   const swapSeen = useRef<Record<number, string[]>>({});
   /** „Rückgängig“-Leiste nach dem Löschen. Eine neue ersetzt die alte – deren Aufräumen läuft dann sofort. */
   const [toast, setToast] = useState<UndoToast | null>(null);
+  /** Familien-Abstimmung offen */
+  const [voteOpen, setVoteOpen] = useState(false);
+  /** Wochen-Rückblick offen */
+  const [reviewOpen, setReviewOpen] = useState(false);
   /** Einkaufsmodus: Vollbild ohne Tab-Leiste */
   const [shopMode, setShopMode] = useState(false);
   const toastRef = useRef<UndoToast | null>(null);
@@ -152,6 +161,7 @@ export default function App() {
 
   // Eigene Rezepte und Preise in den Katalog rechnen, bevor irgendetwas gerendert wird.
   rebuildCatalog(state.customRecipes, state.userPrices, priceLevelFor(state.settings?.store, state.settings?.privateLabel));
+  setMembers(state.settings?.members);
 
   const context = (settings: Settings): PlanContext => ({
     settings,
@@ -160,7 +170,8 @@ export default function App() {
     recentRecipeIds: state.recentRecipeIds,
     kidVotes: state.kidVotes,
     pantry: state.pantry,
-    wishes: Object.values(state.kidWishes ?? {}),
+    wishes: [...Object.values(state.kidWishes ?? {}), ...(state.carryOver ?? [])],
+    votes: voteScores(state.vote),
   });
 
   /**
@@ -183,6 +194,9 @@ export default function App() {
         archive,
         // Der bisherige Plan wird zur "letzten Woche", damit sich Gerichte nicht sofort wiederholen.
         recentRecipeIds: [...(old?.slots.map((s) => s.recipeId).filter(Boolean) ?? []), ...prev.recentRecipeIds].slice(0, RECENT_LIMIT),
+        // Die Abstimmung ist mit dem neuen Plan erledigt, Übernommenes auch
+        vote: undefined,
+        carryOver: (prev.carryOver ?? []).filter((id) => !next.slots.some((s) => s.recipeId === id)),
         // Erfüllte Wunschessen sind erledigt
         kidWishes: Object.fromEntries(Object.entries(prev.kidWishes ?? {}).filter(([, id]) => !next.slots.some((s) => s.recipeId === id))),
         checkedItems: [],
@@ -215,7 +229,7 @@ export default function App() {
       plan: {
         ...prev.plan,
         slots: prev.plan.slots.map((s) => {
-          if (s.day === day) return { day: s.day, recipeId, ...(s.guests ? { guests: s.guests } : {}) };
+          if (s.day === day) return { day: s.day, recipeId, ...(s.guests ? { guests: s.guests } : {}), ...(s.absent ? { absent: s.absent } : {}) };
           // Beim Vorkochen wandert der Reste-Tag mit dem gekochten Gericht mit
           if (!current?.kind && s.kind === 'reste' && s.recipeId === previous && s.day > day) return { ...s, recipeId };
           return s;
@@ -260,7 +274,7 @@ export default function App() {
   const consumeFor = (recipeId: string) => {
     if (state.cooked.includes(recipeId)) return;
     const slot = state.plan?.slots.find((s) => s.recipeId === recipeId && !s.kind);
-    const people = slot?.guests ?? state.settings?.householdSize ?? 4;
+    const people = slot ? slotPeople(slot, state.settings?.householdSize ?? 4) : state.settings?.householdSize ?? 4;
     const before = state.pantry;
     const { used } = consumeCooked(before, recipeId, people);
     if (!used.length) return;
@@ -426,6 +440,33 @@ export default function App() {
         }}
       />
     );
+  } else if (reviewOpen) {
+    const reviewed = shown!;
+    body = (
+      <ReviewScreen plan={reviewed} cooked={reviewed === plan ? state.cooked : reviewed.cooked ?? []} purchases={purchasesFor(planWeekKey(reviewed))}
+        budget={settings.weeklyBudget} photos={state.photos} ratings={state.ratings} kidUps={(id) => kidTally(id, context(settings)).up}
+        pantry={state.pantry} carryOver={state.carryOver ?? []}
+        onCarry={(id) => setState((prev) => ({ ...prev, carryOver: (prev.carryOver ?? []).includes(id) ? (prev.carryOver ?? []).filter((x) => x !== id) : [...(prev.carryOver ?? []), id] }))}
+        onOpen={setOpenRecipe}
+        onPlanNext={() => { setReviewOpen(false); if (planNext) planNext.run(); else createPlan(settings); setTab('plan'); }}
+        onSave={() => markSaved(reviewed, !reviewed.saved)}
+        onBack={() => setReviewOpen(false)} />
+    );
+  } else if (voteOpen) {
+    // Wer abstimmen kann: Mitglieder, sonst „Ich“ + Kinder
+    const voters = settings.members?.length ? settings.members.map((m) => m.name) : [profile.name || 'Ich', ...(settings.kids ?? [])];
+    body = (
+      <VoteScreen vote={state.vote} voters={voters} householdSize={settings.householdSize} photos={state.photos}
+        onStart={() => setState((prev) => ({ ...prev, vote: newVote(eligibleRecipes(context(settings)), prev.recentRecipeIds) }))}
+        onCast={(voter, id, choice) => setState((prev) => {
+          if (!prev.vote) return prev;
+          const { [id]: _, ...rest } = prev.vote.ballots[voter] ?? {};
+          return { ...prev, vote: { ...prev.vote, ballots: { ...prev.vote.ballots, [voter]: choice === null ? rest : { ...rest, [id]: choice } } } };
+        })}
+        onPlan={() => { if (createPlan(settings)) { setVoteOpen(false); setTab('plan'); } }}
+        onOpen={setOpenRecipe}
+        onBack={() => setVoteOpen(false)} />
+    );
   } else if (tab === 'start') {
     body = (
       <OverviewScreen state={state} settings={settings} plan={shown!} isActive={isActiveShown} nav={nav!} todayPlan={todayPlan}
@@ -452,15 +493,28 @@ export default function App() {
         onSwap={swapDay}
         onChoose={(day) => { setError(null); setPickDay(day); }}
         wishes={state.kidWishes ?? {}}
+        vote={state.vote}
+        onVote={() => setVoteOpen(true)}
+        onReview={() => setReviewOpen(true)}
         onMove={(from, to) => setState((prev) => {
           if (!prev.plan) return prev;
           const a = prev.plan.slots.find((x) => x.day === from);
           const b = prev.plan.slots.find((x) => x.day === to);
           if (!a || !b) return prev;
           // Gericht, Art (Reste/Restetag) und Personen wandern mit dem Tag
-          const move = (target: typeof a, src: typeof a) => ({ day: target.day, recipeId: src.recipeId, ...(src.kind ? { kind: src.kind } : {}), ...(src.guests ? { guests: src.guests } : {}) });
+          // Wer an dem Tag da ist (absent), bleibt beim Tag
+          const move = (target: typeof a, src: typeof a) => ({ day: target.day, recipeId: src.recipeId, ...(src.kind ? { kind: src.kind } : {}), ...(src.guests ? { guests: src.guests } : {}), ...(target.absent ? { absent: target.absent } : {}) });
           return { ...prev, plan: { ...prev.plan, slots: prev.plan.slots.map((x) => (x.day === from ? move(a, b) : x.day === to ? move(b, a) : x)) } };
         })}
+        onAbsent={(day, name) => setState((prev) => prev.plan ? {
+          ...prev,
+          plan: { ...prev.plan, slots: prev.plan.slots.map((x) => {
+            if (x.day !== day) return x;
+            const absent = x.absent?.includes(name) ? x.absent.filter((n) => n !== name) : [...(x.absent ?? []), name];
+            const { absent: _, ...rest } = x;
+            return absent.length ? { ...rest, absent } : rest;
+          }) },
+        } : prev)}
         onGuests={(day, guests) => setState((prev) => prev.plan ? {
           ...prev,
           plan: { ...prev.plan, slots: prev.plan.slots.map((x) => {
@@ -581,6 +635,8 @@ export default function App() {
     );
   } else if (moreView === 'vorrat') {
     body = <PantryScreen pantry={state.pantry} onChange={(pantry) => setState((prev) => ({ ...prev, pantry }))} onBack={() => setMoreView(null)}
+      cookable={(pantry) => cookableNow(eligibleRecipes({ ...context(settings), pantry }), pantry, settings.basics)}
+      onOpenRecipe={setOpenRecipe}
       onRemove={(item) => {
         setState((prev) => ({ ...prev, pantry: prev.pantry.filter((p) => p.name !== item.name) }));
         showToast({ text: `${item.name} aus dem Vorrat entfernt`, undo: () => setState((prev) => ({ ...prev, pantry: [...prev.pantry.filter((p) => p.name !== item.name), item] })) });
@@ -596,7 +652,7 @@ export default function App() {
   }
 
   const showNav = !!settings && !!plan && !openRecipe && !editRecipe && pickDay === null;
-  const go = (id: Tab) => { setTab(id); setMoreView(null); setError(null); setShopMode(false); };
+  const go = (id: Tab) => { setTab(id); setMoreView(null); setError(null); setShopMode(false); setVoteOpen(false); setReviewOpen(false); };
   const tabs = layout.isPhone ? TABS.filter(([id]) => PHONE_TABS.includes(id)) : TABS;
 
   return (
