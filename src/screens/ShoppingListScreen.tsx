@@ -4,6 +4,7 @@ import { ingredientCost } from '../data/prices';
 import { sendToBring } from '../bring';
 import { applyPantry } from '../logic/pantry';
 import { RECURRING_CHOICES, findRecurring } from '../logic/recurring';
+import { ShopMode, type ShopRow } from './ShopMode';
 import { cheaperElsewhere, itemPrice, lastBonPrice, preferredStore, shopPriceKey, storeKey } from '../logic/shopPrice';
 import { CATEGORY_ORDER, buildShoppingList, formatAmount, isBasic, shoppingListAsText, shoppingTrip, type ShoppingItem } from '../logic/shoppingList';
 import type { Category, MealPlan, PantryItem, Purchase, RecurringItem, Settings, ShopExtra, ShopPrice } from '../types';
@@ -109,7 +110,7 @@ function TileView({ tile, editing, onToggle, onEdit, onDelete, onSave, onHave, o
 }
 
 export function ShoppingListScreen({
-  plan, settings, checked, pantry, extras, hidden, amounts, purchases, prices, recurring, catOrder, split,
+  plan, settings, checked, pantry, extras, hidden, amounts, purchases, prices, recurring, catOrder, split, shopMode, onShopMode,
   onPrice, onRecurring, onCatOrder, onSplit, onToggle, onReset, onHave, onShopped, onAddExtra, onToggleExtra, onRemoveExtra, onEditExtra, onHide, onAmount,
 }: {
   plan: MealPlan;
@@ -135,6 +136,9 @@ export function ShoppingListScreen({
   onCatOrder: (order: Category[] | undefined) => void;
   /** Nach günstigstem Laden aufteilen */
   split: boolean;
+  /** Einkaufsmodus (Vollbild zum Abhaken im Laden) */
+  shopMode: boolean;
+  onShopMode: (on: boolean) => void;
   onSplit: (on: boolean) => void;
   onToggle: (key: string) => void;
   onReset: () => void;
@@ -326,6 +330,25 @@ export function ShoppingListScreen({
   const trip2 = items.filter((i) => shoppingTrip(i, settings.shopRhythm) === 2);
   const inCart = [...extras.filter((x) => x.done).map(extraTile), ...items.filter((i) => checked.includes(i.key)).map(planTile)];
 
+  if (shopMode) {
+    // Abschnitt je Zeile: bei „Nach Laden aufteilen“ der günstigste Laden, sonst der Ladenbereich
+    const storeOf = (name: string) => (split ? preferredStore(name, purchases) ?? 'Egal wo' : null);
+    const rows: ShopRow[] = [
+      ...extras.map((x): ShopRow => ({
+        key: x.id, name: capitalize(x.name), amount: x.amount ?? '', price: extraPrice(x)?.total, done: !!x.done,
+        section: storeOf(x.name) ?? 'Eigene Artikel', toggle: () => onToggleExtra(x.id),
+      })),
+      ...[...items].sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category)).map((it): ShopRow => ({
+        key: it.key, name: it.name, amount: amounts[it.key] ?? formatAmount(it.amount, it.unit), price: planCost(it), done: checked.includes(it.key),
+        section: storeOf(it.name) ?? it.category, toggle: () => onToggle(it.key),
+      })),
+    ];
+    const sections = split
+      ? [...new Set(rows.map((r) => r.section))].sort((a, b) => (a === 'Egal wo' ? 1 : b === 'Egal wo' ? -1 : a.localeCompare(b)))
+      : ['Eigene Artikel', ...order];
+    return <ShopMode rows={rows} sections={sections} onAdd={onAddExtra} onClose={() => onShopMode(false)} onShopped={() => { onShopMode(false); onShopped(); }} />;
+  }
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <View style={{ gap: 4 }}>
@@ -339,6 +362,8 @@ export function ShoppingListScreen({
         <Text style={styles.sub}>{done} von {total} im Wagen · offen ca. {euro(openCost)}{unpriced ? ` (${unpriced} ohne Preis)` : ''}</Text>
         <View style={local.progress}><View style={[local.progressFill, { width: `${total ? (done / total) * 100 : 0}%` }]} /></View>
       </View>
+
+      {total - done > 0 ? <Button label="Einkaufen starten" icon="shopping-cart" onPress={() => onShopMode(true)} /> : null}
 
       <View style={local.addRow}>
         <TextInput value={newItem} onChangeText={setNewItem} onSubmitEditing={add} placeholder="Artikel hinzufügen, z. B. Kaffee"
@@ -448,7 +473,7 @@ export function ShoppingListScreen({
       ) : null}
 
       {notice ? <Text style={styles.hint}>{notice}</Text> : null}
-      <Button label={bringBusy ? 'Sende an Bring! …' : 'An Bring! senden'} icon="shopping-bag" onPress={() => (bringBusy ? null : toBring())} />
+      <Button label={bringBusy ? 'Sende an Bring! …' : 'An Bring! senden'} variant="secondary" icon="shopping-bag" onPress={() => (bringBusy ? null : toBring())} />
       <Button label="Einkauf erledigt – Bon fotografieren" variant="secondary" icon="camera" onPress={onShopped} />
       <View style={styles.row}>
         <View style={{ flex: 1, minWidth: 150 }}><Button label="Als Text teilen" variant="ghost" icon="share" onPress={share} /></View>

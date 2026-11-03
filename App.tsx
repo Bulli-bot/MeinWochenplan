@@ -73,6 +73,8 @@ export default function App() {
   const swapSeen = useRef<Record<number, string[]>>({});
   /** „Rückgängig“-Leiste nach dem Löschen. Eine neue ersetzt die alte – deren Aufräumen läuft dann sofort. */
   const [toast, setToast] = useState<UndoToast | null>(null);
+  /** Einkaufsmodus: Vollbild ohne Tab-Leiste */
+  const [shopMode, setShopMode] = useState(false);
   const toastRef = useRef<UndoToast | null>(null);
   const showToast = (next: UndoToast | null) => {
     if (next && toastRef.current && toastRef.current !== next) toastRef.current.onExpire?.();
@@ -464,6 +466,8 @@ export default function App() {
         catOrder={state.shopCatOrder}
         onCatOrder={(order) => setState((prev) => ({ ...prev, shopCatOrder: order }))}
         split={!!state.shopSplit}
+        shopMode={shopMode}
+        onShopMode={setShopMode}
         onSplit={(on) => setState((prev) => ({ ...prev, shopSplit: on }))}
         onPrice={(name, price) => setState((prev) => {
           const key = name.trim().toLowerCase();
@@ -540,7 +544,7 @@ export default function App() {
   }
 
   const showNav = !!settings && !!plan && !openRecipe && !editRecipe && pickDay === null;
-  const go = (id: Tab) => { setTab(id); setMoreView(null); setError(null); };
+  const go = (id: Tab) => { setTab(id); setMoreView(null); setError(null); setShopMode(false); };
   const tabs = layout.isPhone ? TABS.filter(([id]) => PHONE_TABS.includes(id)) : TABS;
 
   return (
@@ -596,7 +600,7 @@ export default function App() {
         ) : null}
         <View style={local.main}><View style={[local.body, layout.isDesktop && { maxWidth: 1240 }]}>{body}</View></View>
       </View>
-      {showNav && !layout.isDesktop ? (
+      {showNav && !layout.isDesktop && !(shopMode && tab === 'einkauf') ? (
         <View style={local.tabBar}>
           {tabs.map(([id, label, icon]) => (
             <Pressable key={id} onPress={() => go(id)} style={local.tab} accessibilityRole="tab" accessibilityState={{ selected: tab === id }}>
@@ -608,7 +612,7 @@ export default function App() {
           ))}
         </View>
       ) : null}
-      <Snackbar toast={toast} onClose={() => { toastRef.current = null; setToast(null); }} bottom={showNav && !layout.isDesktop ? 84 : 24} />
+      <Snackbar toast={toast} onClose={() => { toastRef.current = null; setToast(null); }} bottom={showNav && !layout.isDesktop && !(shopMode && tab === 'einkauf') ? 84 : 24} />
     </View>
   );
 }
