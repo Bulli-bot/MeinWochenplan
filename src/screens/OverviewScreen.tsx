@@ -5,8 +5,9 @@ import { BigPhoto, Cover } from '../components';
 import { RECIPE_BY_ID } from '../data/recipes';
 import { greeting, isoWeek, planMonday, shortDate, slotDate, todayInPlan } from '../logic/dates';
 import { planCost, portionCost } from '../logic/generator';
-import { applyPantry, dueSoon, findPantry } from '../logic/pantry';
-import { buildShoppingList, isBasic } from '../logic/shoppingList';
+import { dueSoon, findPantry } from '../logic/pantry';
+import { openShopping } from '../logic/shopPrice';
+import { isBasic } from '../logic/shoppingList';
 import type { AppState, MealPlan, Purchase, Settings } from '../types';
 import { Button, Card, Eyebrow, Grid, Icon, Tag, WEEKDAYS, colors, euro, space, styles, useLayout, type IconName } from '../ui';
 import { CategoryBar } from './ExpensesScreen';
@@ -64,10 +65,8 @@ export function OverviewScreen({ state, settings, plan, isActive, nav, todayPlan
   const meals = plan.slots.filter((s) => !s.kind);
   const cookedCount = meals.filter((s) => cooked.includes(s.recipeId)).length;
   const soon = dueSoon(state.pantry);
-  const open = useMemo(() => {
-    const { toBuy } = applyPantry(buildShoppingList(plan, settings.householdSize), state.pantry);
-    return toBuy.filter((i) => !isBasic(i.name, settings.basics) && !state.checkedItems.includes(i.key)).length + state.shopExtras.filter((x) => !x.done).length;
-  }, [plan, settings.householdSize, settings.basics, state.pantry, state.checkedItems, state.shopExtras]);
+  const shop = useMemo(() => openShopping(state, plan, settings), [state, plan, settings]);
+  const open = shop.count;
 
   // „Heute“ aus dem Plan, der heute gilt; sonst das erste noch nicht gekochte Gericht der angezeigten Woche ab Montag
   const todayIdx = todayPlan ? todayInPlan(todayPlan) : null;
@@ -112,7 +111,8 @@ export function OverviewScreen({ state, settings, plan, isActive, nav, todayPlan
         <Kpi icon="pie-chart" label={`Plan KW ${kw}`} value={euro(total)} sub={`von ${euro(settings.weeklyBudget)} Budget`} />
         <Kpi icon="credit-card" label={`Ausgegeben KW ${kw}`} value={euro(spent)} sub={weekPurchases.length === 1 ? '1 Einkauf' : `${weekPurchases.length} Einkäufe`} tone={budgetTone} onPress={() => onGo('ausgaben')} />
         <Kpi icon="check-circle" label="Gekocht" value={`${cookedCount} / ${meals.length}`} sub={relationLabel(nav.relation)} />
-        <Kpi icon="shopping-cart" label="Noch kaufen" value={String(open)} sub={`${state.pantry.length} im Vorrat`} onPress={() => onGo('einkauf')} />
+        <Kpi icon="shopping-cart" label="Noch kaufen" value={open ? `ca. ${euro(shop.cost)}` : '0'}
+          sub={open ? `${open} Artikel${shop.unpriced ? ` · ${shop.unpriced} ohne Preis` : ''}` : `${state.pantry.length} im Vorrat`} onPress={() => onGo('einkauf')} />
       </Grid>
 
       {soon.length ? (

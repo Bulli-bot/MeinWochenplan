@@ -1,4 +1,7 @@
-import type { Purchase, ShopPrice } from '../types';
+import { ingredientCost } from '../data/prices';
+import { applyPantry } from './pantry';
+import { buildShoppingList, isBasic } from './shoppingList';
+import type { AppState, MealPlan, Purchase, Settings, ShopPrice } from '../types';
 
 const norm = (s: string) => s.trim().toLowerCase();
 
@@ -59,3 +62,28 @@ export function itemPrice(name: string, amount: string | undefined, own: Record<
 }
 
 export const shopPriceKey = norm;
+
+/**
+ * Was beim nächsten Einkauf noch offen ist – Anzahl und Betrag, gerechnet wie in der Einkaufsliste
+ * (Plan-Zutaten ohne Vorrat/Grundzutaten/Ausgeblendetes plus eigene Artikel).
+ */
+export function openShopping(state: AppState, plan: MealPlan, settings: Settings): { count: number; cost: number; unpriced: number } {
+  const own = state.shopPrices ?? {};
+  const amounts = state.shopAmounts ?? {};
+  const hidden = state.shopHidden ?? [];
+  const { toBuy } = applyPantry(buildShoppingList(plan, settings.householdSize).filter((i) => !isBasic(i.name, settings.basics)), state.pantry);
+  const items = toBuy.filter((i) => !hidden.includes(i.key) && !state.checkedItems.includes(i.key));
+  const extras = state.shopExtras.filter((x) => !x.done);
+  let cost = 0;
+  let unpriced = 0;
+  for (const it of items) {
+    cost += itemPrice(it.name, amounts[it.key], own, [])?.total
+      ?? ingredientCost({ name: it.name, amount: it.amount, unit: it.unit, category: it.category }) ?? 0;
+  }
+  for (const x of extras) {
+    const p = itemPrice(x.name, x.amount, own, state.purchases);
+    if (p) cost += p.total;
+    else unpriced += 1;
+  }
+  return { count: items.length + extras.length, cost, unpriced };
+}
