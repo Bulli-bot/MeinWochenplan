@@ -9,6 +9,9 @@ import { CATEGORY_ORDER, buildShoppingList, formatAmount, isBasic, shoppingListA
 import type { Category, MealPlan, PantryItem, Purchase, RecurringItem, Settings, ShopExtra, ShopPrice } from '../types';
 import { Button, Chip, Grid, Icon, colors, euro, hov, space, styles, useLayout } from '../ui';
 
+/** „wattepads“ → „Wattepads“ (einheitlich, auch für ältere Einträge) */
+export const capitalize = (s: string) => s.trim().replace(/^\p{Ll}/u, (c) => c.toUpperCase());
+
 const itemCost = (it: ShoppingItem) => ingredientCost({ name: it.name, amount: it.amount, unit: it.unit, category: it.category }) ?? 0;
 
 /** Eine Kachel – Plan-Zutat oder eigener Artikel, einheitlich dargestellt. */
@@ -88,11 +91,11 @@ function TileView({ tile, editing, onToggle, onEdit, onDelete, onSave, onHave, o
       <View style={local.tileTop}>
         {tile.done ? <View style={local.doneDot}><Icon name="check" size={12} color={colors.onAccent} /></View> : <View style={{ flex: 1 }} />}
         <View style={local.icons}>
-          <Pressable onPress={onEdit} hitSlop={8} accessibilityRole="button" accessibilityLabel={`${tile.name} ändern`} style={(s) => [local.iconBtn, hov(s) && local.iconHover]}>
-            <Icon name="edit-2" size={14} color={colors.muted} />
+          <Pressable onPress={onEdit} hitSlop={4} accessibilityRole="button" accessibilityLabel={`${tile.name} ändern`} style={(s) => [local.iconBtn, hov(s) && local.iconHover]}>
+            <Icon name="edit-2" size={16} color={colors.muted} />
           </Pressable>
-          <Pressable onPress={onDelete} hitSlop={8} accessibilityRole="button" accessibilityLabel={`${tile.name} entfernen`} style={(s) => [local.iconBtn, hov(s) && local.iconHover]}>
-            <Icon name="trash-2" size={14} color={colors.muted} />
+          <Pressable onPress={onDelete} hitSlop={4} accessibilityRole="button" accessibilityLabel={`${tile.name} entfernen`} style={(s) => [local.iconBtn, hov(s) && local.iconHover]}>
+            <Icon name="trash-2" size={16} color={colors.muted} />
           </Pressable>
         </View>
       </View>
@@ -170,6 +173,7 @@ export function ShoppingListScreen({
   const twoTrips = settings.shopRhythm === 'zweimal' && !split;
   const order: Category[] = catOrder?.length === CATEGORY_ORDER.length && CATEGORY_ORDER.every((c) => catOrder.includes(c)) ? catOrder : CATEGORY_ORDER;
   const [orderOpen, setOrderOpen] = useState(false);
+  const [help, setHelp] = useState(false);
   const moveCat = (cat: Category, dir: -1 | 1) => {
     const list = [...order];
     const i = list.indexOf(cat);
@@ -205,7 +209,7 @@ export function ShoppingListScreen({
     const p = extraPrice(x);
     const bon = lastBonPrice(x.name, purchases);
     return {
-      key: x.id, name: x.name, amount: x.amount ?? '',
+      key: x.id, name: capitalize(x.name), amount: x.amount ?? '',
       sub: p ? priceText(p) : x.from === 'vorrat' ? 'Vorrat – Preis? Stift antippen' : 'Preis? Stift antippen',
       tip: tipFor(x.name),
       repeat: findRecurring(recurring, x.name)?.everyDays,
@@ -325,7 +329,13 @@ export function ShoppingListScreen({
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <View style={{ gap: 4 }}>
-        <Text style={styles.h1}>Einkaufsliste</Text>
+        <View style={local.titleRow}>
+          <Text style={styles.h1}>Einkaufsliste</Text>
+          <Pressable onPress={() => setHelp(!help)} accessibilityRole="button" accessibilityLabel="Hilfe zur Einkaufsliste" hitSlop={8}
+            style={(st) => [local.helpBtn, (help || hov(st)) && local.iconHover]}>
+            <Icon name="help-circle" size={18} color={help ? colors.accent : colors.muted} />
+          </Pressable>
+        </View>
         <Text style={styles.sub}>{done} von {total} im Wagen · offen ca. {euro(openCost)}{unpriced ? ` (${unpriced} ohne Preis)` : ''}</Text>
         <View style={local.progress}><View style={[local.progressFill, { width: `${total ? (done / total) * 100 : 0}%` }]} /></View>
       </View>
@@ -337,11 +347,11 @@ export function ShoppingListScreen({
           <Icon name="plus" size={20} color={colors.onAccent} />
         </Pressable>
       </View>
-      <Text style={styles.hint}>Kachel antippen = im Wagen. Stift = Menge, Preis und Wiederholen ändern, Mülleimer = diese Woche nicht kaufen.</Text>
+      {help ? <Text style={styles.hint}>Kachel antippen = im Wagen. Stift = Menge, Preis und Wiederholen ändern, Mülleimer = diese Woche nicht kaufen (lässt sich rückgängig machen).</Text> : null}
 
       <View style={styles.chipRow}>
-        <Chip label="Nach Laden aufteilen" selected={split} onPress={() => onSplit(!split)} />
-        <Chip label="Reihenfolge der Bereiche" selected={orderOpen} onPress={() => setOrderOpen(!orderOpen)} />
+        <Chip icon="git-branch" label="Nach Laden aufteilen" selected={split} onPress={() => onSplit(!split)} />
+        <Chip icon="list" label="Reihenfolge" selected={orderOpen} onPress={() => setOrderOpen(!orderOpen)} />
       </View>
       {orderOpen ? (
         <View style={[styles.card, { gap: 6 }]}>
@@ -457,10 +467,10 @@ const local = StyleSheet.create({
   tileExtra: { borderStyle: 'dashed', borderColor: colors.borderStrong },
   tileDone: { backgroundColor: colors.surface },
   tileEdit: { borderColor: colors.accent, gap: 6 },
-  tileTop: { flexDirection: 'row', alignItems: 'center', minHeight: 26 },
+  tileTop: { flexDirection: 'row', alignItems: 'center', minHeight: 36, marginTop: -4, marginRight: -4 },
   doneDot: { width: 20, height: 20, borderRadius: 10, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center', marginRight: 'auto' },
-  icons: { flexDirection: 'row', gap: 2 },
-  iconBtn: { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  icons: { flexDirection: 'row', gap: 6 },
+  iconBtn: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   iconHover: { backgroundColor: colors.surface },
   name: { fontSize: 15, fontWeight: '700', color: colors.text },
   nameDone: { color: colors.muted, textDecorationLine: 'line-through' },
@@ -468,6 +478,8 @@ const local = StyleSheet.create({
   input: { minHeight: 38, paddingVertical: 6, fontSize: 14 },
   editBtns: { flexDirection: 'row', gap: 6 },
   editBtn: { flex: 1, height: 36, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  helpBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   orderRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   repeatRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
   repeatChip: { paddingHorizontal: 7, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: colors.border },

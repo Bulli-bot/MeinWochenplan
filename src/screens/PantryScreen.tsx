@@ -119,9 +119,11 @@ function ItemForm({ initial, names, onSave, onCancel }: {
 }
 
 /** Vorrat: Lebensmittel fliegen von der Einkaufsliste; mit Verbrauch pro Tag erinnert die App, bevor etwas leer ist. */
-export function PantryScreen({ pantry, onChange, onBack, onToShopping }: {
+export function PantryScreen({ pantry, onChange, onRemove, onBack, onToShopping }: {
   pantry: PantryItem[];
   onChange: (p: PantryItem[]) => void;
+  /** Löschen mit „Rückgängig“ */
+  onRemove: (item: PantryItem) => void;
   onBack: () => void;
   /** Bald leer → auf die eigene Einkaufsliste */
   onToShopping: (name: string) => void;
@@ -235,7 +237,7 @@ export function PantryScreen({ pantry, onChange, onBack, onToShopping }: {
                 <Pressable onPress={() => toggle(p.name)} accessibilityLabel={`${p.name} ${isOpen ? 'zuklappen' : 'ändern'}`} style={(s) => [local.iconBtn, (isOpen || hov(s)) && local.iconHover]}>
                   <Icon name={isOpen ? 'chevron-up' : 'edit-2'} size={16} color={colors.accent} />
                 </Pressable>
-                <Pressable onPress={() => onChange(pantry.filter((x) => x !== p))} accessibilityLabel={`${p.name} aufgebraucht`} style={(s) => [local.iconBtn, hov(s) && local.iconHover]}>
+                <Pressable onPress={() => { if (open === p.name) setOpen(null); onRemove(p); }} accessibilityLabel={`${p.name} aufgebraucht`} style={(s) => [local.iconBtn, hov(s) && local.iconHover]}>
                   <Icon name="trash-2" size={16} color={colors.danger} />
                 </Pressable>
               </View>

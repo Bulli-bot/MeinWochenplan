@@ -24,7 +24,8 @@ import { RecipeEditScreen } from './src/screens/RecipeEditScreen';
 import { RecipeScreen } from './src/screens/RecipeScreen';
 import { DEFAULT_FILTERS, RecipesScreen, type RecipeFilters } from './src/screens/RecipesScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
-import { ShoppingListScreen } from './src/screens/ShoppingListScreen';
+import { ShoppingListScreen, capitalize } from './src/screens/ShoppingListScreen';
+import { Snackbar, type UndoToast } from './src/snackbar';
 import { DEFAULT_SETTINGS, EMPTY_STATE, loadState, saveState } from './src/storage';
 import type { AppState, CustomRecipe, MealPlan, Settings } from './src/types';
 import { Button, Icon, colors, euro, hov, space, styles, useLayout, type IconName } from './src/ui';
@@ -70,6 +71,14 @@ export default function App() {
   const firstSave = useRef(true);
   /** Pro Tag die Rezepte, die beim Tauschen schon dran waren – damit nicht dieselben zurückkommen. */
   const swapSeen = useRef<Record<number, string[]>>({});
+  /** „Rückgängig“-Leiste nach dem Löschen. Eine neue ersetzt die alte – deren Aufräumen läuft dann sofort. */
+  const [toast, setToast] = useState<UndoToast | null>(null);
+  const toastRef = useRef<UndoToast | null>(null);
+  const showToast = (next: UndoToast | null) => {
+    if (next && toastRef.current && toastRef.current !== next) toastRef.current.onExpire?.();
+    toastRef.current = next;
+    setToast(next);
+  };
 
   useEffect(() => {
     (async () => {
@@ -215,10 +224,13 @@ export default function App() {
     return { ...prev, plan: prev.plan ? patch(prev.plan) : prev.plan, archive: prev.archive.map(patch) };
   });
 
-  const addExtra = (name: string, from: 'eigen' | 'vorrat' = 'eigen') => setState((prev) => (
-    prev.shopExtras.some((x) => !x.done && x.name.toLowerCase() === name.toLowerCase()) ? prev
-      : { ...prev, shopExtras: [...prev.shopExtras, { id: `x${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, name, from }] }
-  ));
+  const addExtra = (raw: string, from: 'eigen' | 'vorrat' = 'eigen') => {
+    const name = capitalize(raw);
+    setState((prev) => (
+      prev.shopExtras.some((x) => !x.done && x.name.toLowerCase() === name.toLowerCase()) ? prev
+        : { ...prev, shopExtras: [...prev.shopExtras, { id: `x${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, name, from }] }
+    ));
+  };
 
   const swapDay = (day: number) => {
     if (!state.plan || !state.settings) return false;
@@ -366,8 +378,10 @@ export default function App() {
         })}
         onEdit={() => setEditRecipe(state.customRecipes.find((r) => r.id === id) ?? null)}
         onDelete={() => {
+          const gone = state.customRecipes.find((r) => r.id === id);
           setOpenRecipe(null);
           setState((prev) => ({ ...prev, customRecipes: prev.customRecipes.filter((r) => r.id !== id) }));
+          if (gone) showToast({ text: `„${gone.name}“ gelöscht`, undo: () => setState((prev) => ({ ...prev, customRecipes: [...prev.customRecipes, gone] })) });
         }}
       />
     );
@@ -435,8 +449,12 @@ export default function App() {
         extras={state.shopExtras}
         onAddExtra={(n) => addExtra(n)}
         onToggleExtra={(id) => setState((prev) => ({ ...prev, shopExtras: prev.shopExtras.map((x) => (x.id === id ? { ...x, done: !x.done } : x)) }))}
-        onRemoveExtra={(id) => setState((prev) => ({ ...prev, shopExtras: prev.shopExtras.filter((x) => x.id !== id) }))}
-        onEditExtra={(id, name, amount) => setState((prev) => ({ ...prev, shopExtras: prev.shopExtras.map((x) => (x.id === id ? { ...x, name, amount: amount || undefined } : x)) }))}
+        onRemoveExtra={(id) => {
+          const gone = state.shopExtras.find((x) => x.id === id);
+          setState((prev) => ({ ...prev, shopExtras: prev.shopExtras.filter((x) => x.id !== id) }));
+          if (gone) showToast({ text: `${capitalize(gone.name)} entfernt`, undo: () => setState((prev) => ({ ...prev, shopExtras: [...prev.shopExtras, gone] })) });
+        }}
+        onEditExtra={(id, name, amount) => setState((prev) => ({ ...prev, shopExtras: prev.shopExtras.map((x) => (x.id === id ? { ...x, name: capitalize(name), amount: amount || undefined } : x)) }))}
         hidden={state.shopHidden ?? []}
         amounts={state.shopAmounts ?? {}}
         purchases={state.purchases}
@@ -452,7 +470,11 @@ export default function App() {
           const { [key]: _, ...rest } = prev.shopPrices ?? {};
           return { ...prev, shopPrices: price !== undefined ? { ...rest, [key]: { price, date: new Date().toISOString() } } : rest };
         })}
-        onHide={(key, hide) => setState((prev) => ({ ...prev, shopHidden: hide ? [...(prev.shopHidden ?? []), key] : (prev.shopHidden ?? []).filter((k) => k !== key) }))}
+        onHide={(key, hide) => {
+          const setHidden = (h: boolean) => setState((prev) => ({ ...prev, shopHidden: h ? [...(prev.shopHidden ?? []).filter((k) => k !== key), key] : (prev.shopHidden ?? []).filter((k) => k !== key) }));
+          setHidden(hide);
+          if (hide) showToast({ text: `${key.split('|')[0].replace(/^./, (c) => c.toUpperCase())} diese Woche nicht kaufen`, undo: () => setHidden(false) });
+        }}
         onAmount={(key, text) => setState((prev) => {
           const { [key]: _, ...rest } = prev.shopAmounts ?? {};
           return { ...prev, shopAmounts: text.trim() ? { ...rest, [key]: text.trim() } : rest };
@@ -475,11 +497,16 @@ export default function App() {
         weekOf={weekOf}
         onLearnName={(key, value) => setState((prev) => ({ ...prev, bonNames: { ...prev.bonNames, [key]: value } }))}
         onSave={(p) => setState((prev) => ({ ...prev, purchases: [...prev.purchases.filter((x) => x.id !== p.id), p] }))}
-        onDelete={(id) => setState((prev) => {
-          const gone = prev.purchases.find((p) => p.id === id);
-          if (gone?.photoId) { deletePhotoData(gone.photoId); deleteCloudPhoto(gone.photoId); }
-          return { ...prev, purchases: prev.purchases.filter((p) => p.id !== id) };
-        })}
+        onDelete={(id) => {
+          const gone = state.purchases.find((p) => p.id === id);
+          setState((prev) => ({ ...prev, purchases: prev.purchases.filter((p) => p.id !== id) }));
+          // Das Bon-Foto erst endgültig löschen, wenn nicht rückgängig gemacht wurde
+          if (gone) showToast({
+            text: `Einkauf ${gone.store || ''} (${euro(gone.total)}) gelöscht`.replace('  ', ' '),
+            undo: () => setState((prev) => ({ ...prev, purchases: [...prev.purchases, gone] })),
+            onExpire: () => { if (gone.photoId) { deletePhotoData(gone.photoId); deleteCloudPhoto(gone.photoId); } },
+          });
+        }}
         onLearn={(prices) => setState((prev) => ({ ...prev, userPrices: { ...prev.userPrices, ...prices } }))}
         onBonPhoto={() => takePhoto('bon')}
       />
@@ -498,6 +525,10 @@ export default function App() {
     );
   } else if (moreView === 'vorrat') {
     body = <PantryScreen pantry={state.pantry} onChange={(pantry) => setState((prev) => ({ ...prev, pantry }))} onBack={() => setMoreView(null)}
+      onRemove={(item) => {
+        setState((prev) => ({ ...prev, pantry: prev.pantry.filter((p) => p.name !== item.name) }));
+        showToast({ text: `${item.name} aus dem Vorrat entfernt`, undo: () => setState((prev) => ({ ...prev, pantry: [...prev.pantry.filter((p) => p.name !== item.name), item] })) });
+      }}
       onToShopping={(n) => addExtra(n, 'vorrat')} />;
   } else if (moreView === 'preise') {
     body = <PricesScreen userPrices={state.userPrices} onChange={(userPrices) => setState((prev) => ({ ...prev, userPrices }))} onBack={() => setMoreView(null)} />;
@@ -577,6 +608,7 @@ export default function App() {
           ))}
         </View>
       ) : null}
+      <Snackbar toast={toast} onClose={() => { toastRef.current = null; setToast(null); }} bottom={showNav && !layout.isDesktop ? 84 : 24} />
     </View>
   );
 }

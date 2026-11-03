@@ -30,7 +30,7 @@ function Kpi({ icon, label, value, sub, tone = colors.text, onPress }: { icon: I
         <View style={local.kpiIcon}><Icon name={icon} size={16} color={colors.accent} /></View>
         <Text style={styles.hint} numberOfLines={1}>{label}</Text>
       </View>
-      <Text style={[local.kpiValue, { color: tone }]}>{value}</Text>
+      <Text style={[local.kpiValue, { color: tone }]} numberOfLines={1}>{value}</Text>
       {sub ? <Text style={styles.hint}>{sub}</Text> : null}
     </Card>
   );
@@ -65,7 +65,8 @@ export function OverviewScreen({ state, settings, plan, isActive, nav, todayPlan
   const spent = weekPurchases.reduce((s, p) => s + p.total, 0);
   const meals = plan.slots.filter((s) => !s.kind);
   const cookedCount = meals.filter((s) => cooked.includes(s.recipeId)).length;
-  const soon = dueSoon(state.pantry);
+  // Was schon auf der Liste steht, braucht keine Warnung mehr
+  const soon = dueSoon(state.pantry).filter(({ item }) => !state.shopExtras.some((x) => !x.done && x.name.toLowerCase() === item.name.toLowerCase()));
   const leftovers = useMemo(() => leftoverIdeas(eligibleRecipes({
     settings, favourites: state.favourites, ratings: state.ratings, recentRecipeIds: state.recentRecipeIds, kidVotes: state.kidVotes, pantry: state.pantry,
   }), state.pantry), [settings, state.favourites, state.ratings, state.recentRecipeIds, state.kidVotes, state.pantry]);
@@ -87,6 +88,39 @@ export function OverviewScreen({ state, settings, plan, isActive, nav, todayPlan
   const budgetTone = spent > settings.weeklyBudget ? colors.danger : spent > settings.weeklyBudget * 0.85 ? colors.warn : colors.text;
   const shownToday = todayInPlan(plan);
   const kw = isoWeek(planMonday(plan));
+
+  // „Heute“ ist das Wichtigste – am Handy ganz oben, am PC unter den Kennzahlen
+  const hero = (
+    <>
+      {todaySlot?.kind === 'restetag' ? (
+        <Card accent><Eyebrow color={colors.accent}>Heute</Eyebrow><Text style={styles.h2}>Restetag</Text><Text style={styles.hint}>Nichts kochen – Reste und Vorrat aufbrauchen.</Text></Card>
+      ) : nextRecipe && next ? (
+        <Card accent onPress={() => onOpen(nextRecipe.id)}>
+          <View style={[local.hero, isPhone && { flexDirection: 'column' }]}>
+            <View style={{ flex: 1.2, minWidth: 0 }}>
+              {state.photos[nextRecipe.id]?.[0] ? <BigPhoto id={state.photos[nextRecipe.id][0].id} /> : <Cover id={undefined} height={isPhone ? 140 : 200} />}
+            </View>
+            <View style={{ flex: 1, gap: space.sm, justifyContent: 'center' }}>
+              <Eyebrow color={colors.accent}>{heroPlan === todayPlan && next.day === todayIdx ? 'Heute' : `Als Nächstes · ${WEEKDAYS[next.day]} ${shortDate(slotDate(heroPlan, next.day))}`}</Eyebrow>
+              <Text style={styles.h2}>{nextRecipe.name}</Text>
+              <View style={styles.row}>
+                {heroPlan.slots.find((s) => s.day === next.day)?.kind === 'reste' ? <Tag label="Reste vom Vortag" tone="info" icon="refresh-ccw" /> : null}
+                <Tag label={`${nextRecipe.minutes} Min.`} tone="info" icon="clock" />
+                <Tag label={euro(portionCost(nextRecipe, settings.householdSize))} icon="tag" />
+                {(() => {
+                  const m = missingCount(nextRecipe.id, state, settings);
+                  return m ? <Tag label={`${m} Zutaten fehlen`} tone="warn" icon="alert-triangle" /> : <Tag label="Alles da" tone="accent" icon="check" />;
+                })()}
+              </View>
+              <Button label="Rezept öffnen" icon="book-open" onPress={() => onOpen(nextRecipe.id)} />
+            </View>
+          </View>
+        </Card>
+      ) : (
+        <Card><Text style={styles.sectionTitle}>Alles gekocht – stark!</Text><Text style={styles.hint}>Zeit für einen neuen Plan unter „Woche“.</Text></Card>
+      )}
+    </>
+  );
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
@@ -111,27 +145,26 @@ export function OverviewScreen({ state, settings, plan, isActive, nav, todayPlan
         </Card>
       ) : null}
 
+      {isPhone ? hero : null}
+
       <Grid columns={isPhone ? 2 : 4}>
         <Kpi icon="pie-chart" label={`Plan KW ${kw}`} value={euro(total)} sub={`von ${euro(settings.weeklyBudget)} Budget`} />
-        <Kpi icon="credit-card" label={`Ausgegeben KW ${kw}`} value={euro(spent)} sub={weekPurchases.length === 1 ? '1 Einkauf' : `${weekPurchases.length} Einkäufe`} tone={budgetTone} onPress={() => onGo('ausgaben')} />
+        <Kpi icon="credit-card" label={isPhone ? 'Ausgegeben' : `Ausgegeben KW ${kw}`} value={euro(spent)} sub={weekPurchases.length === 1 ? '1 Einkauf' : `${weekPurchases.length} Einkäufe`} tone={budgetTone} onPress={() => onGo('ausgaben')} />
         <Kpi icon="check-circle" label="Gekocht" value={`${cookedCount} / ${meals.length}`} sub={relationLabel(nav.relation)} />
-        <Kpi icon="shopping-cart" label="Noch kaufen" value={open ? `ca. ${euro(shop.cost)}` : '0'}
-          sub={open ? `${open} Artikel${shop.unpriced ? ` · ${shop.unpriced} ohne Preis` : ''}` : `${state.pantry.length} im Vorrat`} onPress={() => onGo('einkauf')} />
+        <Kpi icon="shopping-cart" label="Noch kaufen" value={open ? euro(shop.cost) : '0'}
+          sub={open ? `geschätzt · ${open} Artikel${shop.unpriced ? `, ${shop.unpriced} ohne Preis` : ''}` : `${state.pantry.length} im Vorrat`} onPress={() => onGo('einkauf')} />
       </Grid>
 
       {soon.length ? (
         <Card style={{ borderColor: colors.warn, gap: space.sm }}>
           <View style={styles.row}><Icon name="bell" color={colors.warn} /><Text style={styles.sectionTitle}>Bald leer</Text></View>
           {soon.slice(0, 4).map(({ item, left, days }) => {
-            const listed = state.shopExtras.some((x) => !x.done && x.name.toLowerCase() === item.name.toLowerCase());
             return (
               <View key={item.name} style={local.soonRow}>
                 <Text style={[styles.hint, { flex: 1, color: colors.text }]}>
                   <Text style={{ fontWeight: '700' }}>{item.name}</Text> · {days === 0 ? 'heute leer' : `noch ${left.toLocaleString('de-DE')} ${item.unit ?? ''}, reicht ${days === 1 ? 'bis morgen' : `${days} Tage`}`}
                 </Text>
-                {listed ? <Tag label="auf der Liste" tone="accent" icon="check" /> : (
-                  <Pressable onPress={() => onToShopping(item.name)} style={styles.small}><Text style={styles.smallText}>Auf die Liste</Text></Pressable>
-                )}
+                <Pressable onPress={() => onToShopping(item.name)} style={styles.small}><Text style={styles.smallText}>Auf die Liste</Text></Pressable>
               </View>
             );
           })}
@@ -160,33 +193,7 @@ export function OverviewScreen({ state, settings, plan, isActive, nav, todayPlan
         </Card>
       ) : null}
 
-      {todaySlot?.kind === 'restetag' ? (
-        <Card accent><Eyebrow color={colors.accent}>Heute</Eyebrow><Text style={styles.h2}>Restetag</Text><Text style={styles.hint}>Nichts kochen – Reste und Vorrat aufbrauchen.</Text></Card>
-      ) : nextRecipe && next ? (
-        <Card accent onPress={() => onOpen(nextRecipe.id)}>
-          <View style={[local.hero, isPhone && { flexDirection: 'column' }]}>
-            <View style={{ flex: 1.2, minWidth: 0 }}>
-              {state.photos[nextRecipe.id]?.[0] ? <BigPhoto id={state.photos[nextRecipe.id][0].id} /> : <Cover id={undefined} height={isPhone ? 140 : 200} />}
-            </View>
-            <View style={{ flex: 1, gap: space.sm, justifyContent: 'center' }}>
-              <Eyebrow color={colors.accent}>{heroPlan === todayPlan && next.day === todayIdx ? 'Heute' : `Als Nächstes · ${WEEKDAYS[next.day]} ${shortDate(slotDate(heroPlan, next.day))}`}</Eyebrow>
-              <Text style={styles.h2}>{nextRecipe.name}</Text>
-              <View style={styles.row}>
-                {heroPlan.slots.find((s) => s.day === next.day)?.kind === 'reste' ? <Tag label="Reste vom Vortag" tone="info" icon="refresh-ccw" /> : null}
-                <Tag label={`${nextRecipe.minutes} Min.`} tone="info" icon="clock" />
-                <Tag label={euro(portionCost(nextRecipe, settings.householdSize))} icon="tag" />
-                {(() => {
-                  const m = missingCount(nextRecipe.id, state, settings);
-                  return m ? <Tag label={`${m} Zutaten fehlen`} tone="warn" icon="alert-triangle" /> : <Tag label="Alles da" tone="accent" icon="check" />;
-                })()}
-              </View>
-              <Button label="Rezept öffnen" icon="book-open" onPress={() => onOpen(nextRecipe.id)} />
-            </View>
-          </View>
-        </Card>
-      ) : (
-        <Card><Text style={styles.sectionTitle}>Alles gekocht – stark!</Text><Text style={styles.hint}>Zeit für einen neuen Plan unter „Woche“.</Text></Card>
-      )}
+      {!isPhone ? hero : null}
 
       <View style={local.sectionHead}>
         <Text style={styles.h2}>{relationLabel(nav.relation)}</Text>

@@ -97,10 +97,12 @@ export function Eyebrow({ children, color = colors.muted }: { children: ReactNod
   return <Text style={[styles.eyebrow, { color }]}>{children}</Text>;
 }
 
-export function Chip({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
+/** Auswahl-Chip; mit `icon` als Schalter (Ein/Aus) erkennbar. */
+export function Chip({ label, selected, onPress, icon }: { label: string; selected: boolean; onPress: () => void; icon?: IconName }) {
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityState={{ selected }}
-      style={(s) => [styles.chip, hov(s) && !selected && styles.chipHover, selected && styles.chipSelected]}>
+    <Pressable onPress={onPress} accessibilityRole={icon ? 'switch' : 'button'} accessibilityState={icon ? { checked: selected } : { selected }}
+      style={(s) => [styles.chip, icon && styles.chipIcon, hov(s) && !selected && styles.chipHover, selected && styles.chipSelected]}>
+      {icon ? <Icon name={icon} size={15} color={selected ? colors.onAccent : colors.muted} /> : null}
       <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{label}</Text>
     </Pressable>
   );
@@ -183,6 +185,7 @@ export const styles = StyleSheet.create({
   tagText: { fontSize: 12, fontWeight: '600' },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   chip: { minHeight: 36, maxWidth: '100%', justifyContent: 'center', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+  chipIcon: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   chipHover: { borderColor: colors.borderStrong, backgroundColor: colors.cardHover },
   chipSelected: { backgroundColor: colors.accent, borderColor: colors.accent },
   chipText: { fontSize: 14, color: colors.text, flexShrink: 1 },
