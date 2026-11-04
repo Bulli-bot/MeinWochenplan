@@ -600,10 +600,10 @@ export default function App() {
         shopMode={shopMode}
         onShopMode={setShopMode}
         onSplit={(on) => setState((prev) => ({ ...prev, shopSplit: on }))}
-        onPrice={(name, price) => setState((prev) => {
+        onPrice={(name, price, deposit) => setState((prev) => {
           const key = name.trim().toLowerCase();
           const { [key]: _, ...rest } = prev.shopPrices ?? {};
-          return { ...prev, shopPrices: price !== undefined ? { ...rest, [key]: { price, date: new Date().toISOString() } } : rest };
+          return { ...prev, shopPrices: price !== undefined ? { ...rest, [key]: { price, ...(deposit !== undefined ? { deposit } : {}), date: new Date().toISOString() } } : rest };
         })}
         onHide={(key, hide) => {
           const setHidden = (h: boolean) => setState((prev) => ({ ...prev, shopHidden: h ? [...(prev.shopHidden ?? []).filter((k) => k !== key), key] : (prev.shopHidden ?? []).filter((k) => k !== key) }));

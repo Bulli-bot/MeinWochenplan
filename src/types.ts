@@ -198,6 +198,8 @@ export interface CalendarFeed {
 
 export interface ShopPrice {
   price: number;
+  /** Pfand je Stück/Kasten, selbst eingetragen (0 = kein Pfand); fehlt = vom Bon */
+  deposit?: number;
   /** ISO-Datum der Eingabe */
   date: string;
 }

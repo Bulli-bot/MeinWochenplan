@@ -64,7 +64,8 @@ export function itemPrice(name: string, amount: string | undefined, own: Record<
   const mine = own[norm(name)];
   const bon = lastBonPrice(name, purchases);
   // Pfand vom Bon gilt auch, wenn der Preis selbst eingetragen ist (Regalpreis ohne Pfand)
-  const deposit = bon?.deposit ?? 0;
+  // Selbst eingetragenes Pfand hat Vorrang (auch 0 = „kein Pfand“)
+  const deposit = mine?.deposit !== undefined ? mine.deposit : bon?.deposit ?? 0;
   if (mine) return { each: mine.price, deposit, count, total: (mine.price + deposit) * count, source: 'eigen' };
   if (!bon) return null;
   const day = new Date(bon.date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });

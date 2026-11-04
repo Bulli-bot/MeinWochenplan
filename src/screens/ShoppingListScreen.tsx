@@ -27,6 +27,10 @@ interface Tile {
   extra?: ShopExtra;
   /** Eigener Preis je Stück/Packung (zum Bearbeiten) */
   ownPrice?: number;
+  /** Eigenes Pfand je Stück/Kasten (zum Bearbeiten) */
+  ownDeposit?: number;
+  /** Vorschlag im Pfandfeld, z. B. vom letzten Bon */
+  depositHint?: string;
   /** Vorschlag im Preisfeld, z. B. vom letzten Bon */
   priceHint?: string;
   /** Hinweis „bei ALDI 0,30 € günstiger“ */
@@ -41,7 +45,7 @@ function TileView({ tile, editing, onToggle, onEdit, onDelete, onSave, onHave, o
   onToggle: () => void;
   onEdit: () => void;
   onDelete: () => void;
-  onSave: (name: string, amount: string, price: string, repeat: number) => void;
+  onSave: (name: string, amount: string, price: string, deposit: string, repeat: number) => void;
   /** Nur Plan-Zutaten: „hab ich noch“ → Vorrat */
   onHave?: () => void;
   onCancel: () => void;
@@ -49,8 +53,9 @@ function TileView({ tile, editing, onToggle, onEdit, onDelete, onSave, onHave, o
   const [name, setName] = useState(tile.name);
   const [amount, setAmount] = useState(tile.amount);
   const [price, setPrice] = useState(tile.ownPrice !== undefined ? tile.ownPrice.toFixed(2).replace('.', ',') : '');
+  const [deposit, setDeposit] = useState(tile.ownDeposit !== undefined ? tile.ownDeposit.toFixed(2).replace('.', ',') : '');
   const [repeat, setRepeat] = useState(tile.repeat ?? 0);
-  const save = () => onSave(name, amount, price, repeat);
+  const save = () => onSave(name, amount, price, deposit, repeat);
   if (editing) {
     return (
       <View style={[local.tile, local.tileEdit]}>
@@ -61,6 +66,8 @@ function TileView({ tile, editing, onToggle, onEdit, onDelete, onSave, onHave, o
           style={[styles.input, local.input]} autoFocus={!tile.extra} onSubmitEditing={save} />
         <TextInput value={price} onChangeText={setPrice} placeholder={tile.priceHint ?? 'Preis je Stück/Packung in €'} placeholderTextColor={colors.muted}
           keyboardType="decimal-pad" style={[styles.input, local.input]} onSubmitEditing={save} accessibilityLabel="Preis je Stück oder Packung" />
+        <TextInput value={deposit} onChangeText={setDeposit} placeholder={tile.depositHint ?? 'Pfand € (z. B. 3,30 je Kasten)'} placeholderTextColor={colors.muted}
+          keyboardType="decimal-pad" style={[styles.input, local.input]} onSubmitEditing={save} accessibilityLabel="Pfand je Stück oder Kasten" />
         {tile.extra ? (
           <View style={{ gap: 4 }}>
             <Text style={styles.hint}>Kommt wieder alle:</Text>
@@ -129,7 +136,7 @@ export function ShoppingListScreen({
   /** Selbst eingetragene Preise je Stück/Packung */
   prices: Record<string, ShopPrice>;
   /** Preis merken (undefined = eigenen Preis löschen) */
-  onPrice: (name: string, price: number | undefined) => void;
+  onPrice: (name: string, price: number | undefined, deposit?: number) => void;
   recurring: RecurringItem[];
   /** Regelmäßigkeit eines eigenen Artikels setzen (0 = aus) */
   onRecurring: (name: string, amount: string | undefined, everyDays: number) => void;
@@ -216,6 +223,7 @@ export function ShoppingListScreen({
       sub: own ? `${priceText(own)} · ${it.recipes.join(', ')}` : `ca. ${euro(itemCost(it))} · ${it.recipes.join(', ')}`,
       done: checked.includes(it.key),
       ownPrice: prices[shopPriceKey(it.name)]?.price,
+      ownDeposit: prices[shopPriceKey(it.name)]?.deposit,
       priceHint: `Preis €, ca. ${euro(itemCost(it))}`,
       tip: tipFor(it.name),
     };
@@ -230,7 +238,9 @@ export function ShoppingListScreen({
       repeat: findRecurring(recurring, x.name)?.everyDays,
       done: !!x.done, extra: x,
       ownPrice: prices[shopPriceKey(x.name)]?.price,
+      ownDeposit: prices[shopPriceKey(x.name)]?.deposit,
       priceHint: bon ? `Preis €, zuletzt ${euro(bon.price)}` : 'Preis € je Stück',
+      depositHint: bon?.deposit ? `Pfand €, laut Bon ${euro(bon.deposit)}` : undefined,
     };
   };
 
@@ -294,11 +304,17 @@ export function ShoppingListScreen({
       onEdit={() => setEditing(t.key)}
       onCancel={() => setEditing(null)}
       onDelete={() => { setEditing(null); if (t.extra) onRemoveExtra(t.extra.id); else onHide(t.key, true); }}
-      onSave={(name, amount, price, repeat) => {
-        const value = parseFloat(price.replace(',', '.').replace(/[^0-9.]/g, ''));
-        const own = Number.isFinite(value) && value > 0 ? Math.round(value * 100) / 100 : undefined;
+      onSave={(name, amount, price, deposit, repeat) => {
+        const num = (s: string) => {
+          const v = parseFloat(s.replace(',', '.').replace(/[^0-9.]/g, ''));
+          return Number.isFinite(v) ? Math.round(v * 100) / 100 : undefined;
+        };
+        const p = num(price);
+        const own = p !== undefined && p > 0 ? p : undefined;
+        // Pfand: leer = wie vom Bon, 0 = kein Pfand
+        const dep = deposit.trim() ? num(deposit) : undefined;
         const finalName = t.extra ? name.trim() || t.name : t.name;
-        if (own !== t.ownPrice) onPrice(finalName, own);
+        if (own !== t.ownPrice || dep !== t.ownDeposit) onPrice(finalName, own, own !== undefined ? dep : undefined);
         if (t.extra && repeat !== (t.repeat ?? 0)) onRecurring(finalName, amount, repeat);
         if (t.extra) onEditExtra(t.extra.id, name.trim() || t.name, amount.trim());
         else {
