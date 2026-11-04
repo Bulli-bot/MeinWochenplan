@@ -374,17 +374,29 @@ function ItemEditor({ item, onSave, onDelete, onCancel, ask }: {
   const [price, setPrice] = useState(money(item.price));
   const [category, setCategory] = useState<SpendCategory>(item.category);
   const [remember, setRemember] = useState(true);
+  // Zutat für Vorrat und Preise: selbst festlegbar; solange nicht angefasst, aus dem Namen erraten
+  const [ingredient, setIngredient] = useState<string | null>(null);
+  const guessed = (label.trim() ? matchIngredient(label.trim()) : undefined) ?? (label.trim() === (item.label ?? item.name) ? item.ingredient : undefined);
+  const shownIngredient = ingredient ?? guessed ?? '';
   const apply = () => {
     const p = parseFloat(price.replace(',', '.'));
     const clean = label.trim();
-    const ingredient = clean ? matchIngredient(clean) ?? item.ingredient : item.ingredient;
-    onSave({ ...item, label: clean && clean !== item.name ? clean : undefined, price: Number.isFinite(p) ? p : item.price, category, ingredient, known: true }, remember && !!clean);
+    const ing = shownIngredient.trim();
+    onSave({
+      ...item, label: clean && clean !== item.name ? clean : undefined, price: Number.isFinite(p) ? p : item.price, category,
+      ingredient: ing || undefined, ingredientSet: ingredient !== null, known: true,
+    } as PurchaseItem, remember && !!clean);
   };
   return (
     <View style={local.editor}>
       <Text style={styles.hint}>Auf dem Bon: <Text style={{ color: colors.text, fontWeight: '700' }}>{item.name}</Text></Text>
       <Field label={ask ? 'Was ist das?' : 'Name'} value={label} onChangeText={setLabel} placeholder="z. B. Toilettenpapier" autoFocus={ask} onSubmitEditing={apply} />
       {!ask ? <Field label="Preis in €" value={price} onChangeText={setPrice} keyboardType="decimal-pad" /> : null}
+      <Field label="Zählt als Zutat (für Vorrat und Rezeptpreise) – leer = keine" value={shownIngredient} onChangeText={setIngredient} placeholder="z. B. Milch, Hackfleisch" />
+      <View style={styles.chipRow}>
+        <Chip icon="slash" label="Keine Zutat" selected={!shownIngredient.trim()} onPress={() => setIngredient('')} />
+        {guessed && shownIngredient !== guessed ? <Chip label={`Vorschlag: ${guessed}`} selected={false} onPress={() => setIngredient(guessed)} /> : null}
+      </View>
       <View style={styles.chipRow}>
         {CATEGORY_ORDER.map((c) => <Chip key={c} label={CATEGORY_LABEL[c]} selected={category === c} onPress={() => setCategory(c)} />)}
       </View>
@@ -429,9 +441,12 @@ function PurchaseDetail({ purchase, planIngredients, onBack, onSave, onDelete, o
     // Gehört der neue Name zu einer Zutat dieser Woche, zählt er zum Wochenplan
     const category = it.ingredient && planIngredients.has(it.ingredient) && it.category === 'extra' ? 'plan' : it.category;
     const next = { ...it, category };
-    const items = purchase.items.map((x, i) => (i === idx ? next : x));
+    const { ingredientSet: _, ...stored } = next as PurchaseItem & { ingredientSet?: boolean };
+    const items = purchase.items.map((x, i) => (i === idx ? stored : x));
     onSave({ ...purchase, items, total: purchase.items.length ? Math.round(items.reduce((s, x) => s + x.price, 0) * 100) / 100 || purchase.total : purchase.total });
-    if (remember && next.label) onLearnName(bonKey(next.name), { name: next.label, category: next.category, ingredient: next.ingredient });
+    // Selbst festgelegte Zutat merken – auch „keine“ (leerer Text), damit der Name nicht wieder als Milch o. Ä. erkannt wird
+    const { ingredientSet, ...clean } = next as PurchaseItem & { ingredientSet?: boolean };
+    if (remember && clean.label) onLearnName(bonKey(clean.name), { name: clean.label, category: clean.category, ingredient: clean.ingredient ?? (ingredientSet ? '' : undefined) });
     setEditIdx(null);
   };
   const deleteItem = (idx: number) => {

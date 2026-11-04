@@ -32,7 +32,8 @@ const ALIASES: [RegExp, string][] = [
   [/frischk/i, 'Frischkäse'],
   [/quark/i, 'Kräuterquark'],
   [/joghurt/i, 'Joghurt'],
-  [/milch(?!reis)/i, 'Milch'],
+  // Nur echte Milch – nicht Milchdrink, Müllermilch, Schokomilch, Milchreis, Milchschnitte …
+  [/(?<!schoko|kakao|müller|erdbeer|bananen|vanille|kinder|kokos|hafer|soja|mandel)milch(?!reis|drink|misch|schnitte|shake|brötchen|brot|schoko|kaffee|tee|creme|pudding|zucker)/i, 'Milch'],
   [/markenbutter|butter/i, 'Butter'],
   [/\beier?\b|freiland|bodenhalt/i, 'Eier'],
   [/tortell|gnocchi/i, 'Tortellini'],
@@ -161,7 +162,8 @@ export const bonKey = (name: string) => name.toLowerCase().replace(/\s+/g, ' ').
 export function classifyWithMemory(name: string, planIngredients: Set<string>, bonNames: Record<string, BonName>): Pick<PurchaseItem, 'category' | 'ingredient' | 'label' | 'known'> {
   const learned = bonNames[bonKey(name)];
   if (learned) {
-    const ingredient = learned.ingredient ?? matchIngredient(learned.name);
+    // ingredient: '' = bewusst „keine Zutat“ (selbst so festgelegt)
+    const ingredient = learned.ingredient !== undefined ? learned.ingredient || undefined : matchIngredient(learned.name);
     const category = ingredient && planIngredients.has(ingredient) ? 'plan' : learned.category === 'plan' && !ingredient ? 'extra' : learned.category;
     return { label: learned.name, category, ingredient, known: true };
   }
