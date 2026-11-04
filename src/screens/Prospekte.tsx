@@ -6,16 +6,12 @@ import { Button, Icon, colors, hov, radius, space, styles } from '../ui';
 
 /** Offizielle Prospekt-Seiten (geprüft 04.11.2026). Nur Links – die App liest dort nichts aus. */
 export const DEFAULT_FLYERS: FlyerLink[] = [
-  { id: 'aldi-sued', name: 'ALDI SÜD', url: 'https://www.aldi-sued.de/prospekte' },
-  { id: 'edeka', name: 'EDEKA', url: 'https://www.edeka.de/angebote/' },
-  { id: 'trinkgut', name: 'trinkgut', url: 'https://www.trinkgut.de/angebote' },
-  { id: 'lidl', name: 'Lidl', url: 'https://www.lidl.de/c/online-prospekte/s10005610' },
   { id: 'kaufland', name: 'Kaufland', url: 'https://filiale.kaufland.de/prospekte.html' },
-  { id: 'rewe', name: 'REWE', url: 'https://www.rewe.de/angebote/' },
+  { id: 'edeka', name: 'EDEKA', url: 'https://www.edeka.de/angebote/' },
+  { id: 'aldi-sued', name: 'ALDI SÜD', url: 'https://www.aldi-sued.de/prospekte' },
+  { id: 'lidl', name: 'Lidl', url: 'https://www.lidl.de/c/online-prospekte/s10005610' },
+  { id: 'trinkgut', name: 'trinkgut', url: 'https://www.trinkgut.de/angebote' },
   { id: 'netto', name: 'Netto', url: 'https://www.netto-online.de/ueber-netto/Online-Prospekte.chtm' },
-  { id: 'penny', name: 'PENNY', url: 'https://www.penny.de/angebote' },
-  { id: 'dm', name: 'dm', url: 'https://www.dm.de/angebote' },
-  { id: 'rossmann', name: 'Rossmann', url: 'https://www.rossmann.de/de/angebote/prospekt' },
 ];
 
 const open = (url: string) => {
