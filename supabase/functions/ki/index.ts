@@ -1,7 +1,7 @@
 // Supabase Edge Function „ki": KI-Assistent und Bon-Lesen über Google Gemini für unterwegs.
 // Nur für angemeldete, vom Besitzer freigegebene Konten. Der Gemini-Schlüssel liegt als Secret
 // GEMINI_API_KEY in Supabase (Edge Functions → Secrets) und verlässt den Server nie.
-// Optional: GEMINI_MODEL (Standard gemini-2.5-flash).
+// Optional: GEMINI_MODEL (Standard gemini-3.8-flash).
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const CORS = {
@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
     return json(400, { error: 'Ungültige Anfrage' });
   }
 
-  const model = Deno.env.get('GEMINI_MODEL') || 'gemini-2.5-flash';
+  const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.8-flash';
   let payload: Record<string, unknown>;
   // „bon“: Kassenbon; „bild“: beliebiges Foto mit eigener Frage (Rezept vom Kochbuch, Kühlschrank) – Antwort als JSON-Text
   if (body.mode === 'bon' || body.mode === 'bild') {
