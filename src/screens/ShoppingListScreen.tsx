@@ -8,8 +8,9 @@ import { ShopMode, type ShopRow } from './ShopMode';
 import { cheaperElsewhere, itemPrice, lastBonPrice, preferredStore, priceTrend, shopPriceKey, storeKey } from '../logic/shopPrice';
 import { BarcodeScan } from './BarcodeScan';
 import { PfandCard, TrendCard } from './ShopCards';
+import { Prospekte } from './Prospekte';
 import { CATEGORY_ORDER, buildShoppingList, formatAmount, isBasic, shoppingListAsText, shoppingTrip, type ShoppingItem } from '../logic/shoppingList';
-import type { Category, MealPlan, PantryItem, Purchase, RecurringItem, Settings, ShopExtra, ShopPrice } from '../types';
+import type { Category, FlyerLink, MealPlan, PantryItem, Purchase, RecurringItem, Settings, ShopExtra, ShopPrice } from '../types';
 import { Button, Chip, Grid, Icon, Split, autoColumns, colors, contentWidth, euro, hov, space, styles, useLayout } from '../ui';
 
 /** „wattepads“ → „Wattepads“ (einheitlich, auch für ältere Einträge) */
@@ -120,7 +121,7 @@ function TileView({ tile, editing, onToggle, onEdit, onDelete, onSave, onHave, o
 
 export function ShoppingListScreen({
   plan, settings, checked, pantry, extras, hidden, amounts, purchases, prices, recurring, catOrder, split, shopMode, onShopMode,
-  onPrice, onRecurring, onCatOrder, onSplit, onToggle, onReset, onHave, onShopped, onScanned, onAddExtra, onBuyAnyway, onToggleExtra, onRemoveExtra, onEditExtra, onHide, onAmount,
+  onPrice, onRecurring, onCatOrder, onSplit, onToggle, onReset, onHave, onShopped, onScanned, flyerLinks, onFlyerLinks, onAddExtra, onBuyAnyway, onToggleExtra, onRemoveExtra, onEditExtra, onHide, onAmount,
 }: {
   plan: MealPlan;
   settings: Settings;
@@ -155,6 +156,9 @@ export function ShoppingListScreen({
   onHave: (name: string) => void;
   /** Einkauf fertig → weiter zu Ausgaben (Bon fotografieren) */
   onShopped: () => void;
+  /** Links zu den Händler-Prospekten */
+  flyerLinks: FlyerLink[] | undefined;
+  onFlyerLinks: (links: FlyerLink[]) => void;
   /** Leer-Scan: Artikel ist aufgebraucht → auf die Liste, aus dem Vorrat */
   onScanned: (name: string) => void;
   onAddExtra: (name: string) => void;
@@ -171,6 +175,7 @@ export function ShoppingListScreen({
   const columns = isPhone ? 2 : autoColumns(contentWidth(width) - (isWide ? 380 + space.xl : 0), 190, 6);
   const [pantryOpen, setPantryOpen] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [view, setView] = useState<'liste' | 'prospekte'>('liste');
   const all = useMemo(() => buildShoppingList(plan, settings.householdSize), [plan, settings.householdSize]);
   const basics = all.filter((i) => isBasic(i.name, settings.basics));
   const { toBuy, fromPantry } = useMemo(() => applyPantry(all.filter((i) => !isBasic(i.name, settings.basics)), pantry), [all, pantry, settings.basics]);
@@ -392,6 +397,12 @@ export function ShoppingListScreen({
         <View style={local.progress}><View style={[local.progressFill, { width: `${total ? (done / total) * 100 : 0}%` }]} /></View>
       </View>
 
+      <View style={styles.row}>
+        <Chip icon="list" label="Liste" selected={view === 'liste'} onPress={() => setView('liste')} />
+        <Chip icon="book-open" label="Prospekte" selected={view === 'prospekte'} onPress={() => setView('prospekte')} />
+      </View>
+
+      {view === 'prospekte' ? <Prospekte links={flyerLinks} onChange={onFlyerLinks} /> : (<>
       {!isWide ? startBtn : null}
       <Split
         main={<>
@@ -550,6 +561,7 @@ export function ShoppingListScreen({
 
         </>}
       />
+      </>)}
     </ScrollView>
   );
 }

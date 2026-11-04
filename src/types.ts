@@ -166,8 +166,16 @@ export interface AppState {
   vote?: FamilyVote;
   /** Wunschessen: Kind → Rezept-ID (für den nächsten Plan) */
   kidWishes?: Record<string, string>;
+  /** Links zu den Wochenprospekten der Händler (fehlt = Standard-Liste) */
+  flyerLinks?: FlyerLink[];
   /** Auszug für das Kalender-Abo (wird von der App geschrieben, vom Server gelesen) */
   calendar?: CalendarFeed;
+}
+
+export interface FlyerLink {
+  id: string;
+  name: string;
+  url: string;
 }
 
 export interface RecurringItem {

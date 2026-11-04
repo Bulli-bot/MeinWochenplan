@@ -619,6 +619,8 @@ export default function App() {
         onHave={(name) => setState((prev) => ({ ...prev, pantry: [...prev.pantry.filter((p) => p.name !== name), { name }] }))}
         onShopped={() => setTab('ausgaben')}
         onScanned={scannedEmpty}
+        flyerLinks={state.flyerLinks}
+        onFlyerLinks={(flyerLinks) => setState((prev) => ({ ...prev, flyerLinks }))}
       />
     );
   } else if (tab === 'ausgaben') {
