@@ -65,18 +65,33 @@ Deno.serve(async (req) => {
     };
   }
 
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-    body: JSON.stringify(payload),
-  });
-  const out = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const msg = res.status === 429 ? 'Gemini-Tageslimit erreicht – morgen wieder oder am PC fragen.' : out?.error?.message ?? `Gemini-Fehler ${res.status}`;
+  // Bei Überlastung (503/500) kurz warten und erneut versuchen, zuletzt mit dem Ausweichmodell (Secret GEMINI_FALLBACK_MODEL)
+  const fallback = Deno.env.get('GEMINI_FALLBACK_MODEL');
+  const tries = [model, model, ...(fallback && fallback !== model ? [fallback] : [model])];
+  let res: Response | null = null;
+  let out: any = {};
+  let used = model;
+  for (let i = 0; i < tries.length; i++) {
+    used = tries[i];
+    if (i) await new Promise((r) => setTimeout(r, 1500 * i));
+    res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${used}:generateContent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+      body: JSON.stringify(payload),
+    });
+    out = await res.json().catch(() => ({}));
+    if (res.ok || (res.status !== 503 && res.status !== 500)) break;
+  }
+  if (!res || !res.ok) {
+    const status = res?.status ?? 0;
+    const msg = status === 429 ? 'Gemini-Tageslimit erreicht – morgen wieder oder am PC fragen.'
+      : status === 503 || status === 500 ? 'Gemini ist gerade überlastet. Das Foto bleibt gespeichert – später nochmal „Auslesen“ oder am PC auslesen.'
+      : out?.error?.message ?? `Gemini-Fehler ${status}`;
     return json(502, { error: msg });
   }
+  const model_ = used;
   const text = (out?.candidates?.[0]?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? '').join('').trim();
-  if (body.mode !== 'bon') return json(200, { text, model });
+  if (body.mode !== 'bon') return json(200, { text, model: model_ });
 
   try {
     const data = JSON.parse(text);
@@ -84,7 +99,7 @@ Deno.serve(async (req) => {
     const artikel = (data.zeilen ?? data.artikel ?? [])
       .map((a: { name?: string; preis?: unknown; kg?: unknown }) => ({ name: String(a.name ?? '').trim(), preis: num(a.preis), kg: a.kg == null ? null : num(a.kg) || null }))
       .filter((a: { name: string; preis: number }) => a.name && Number.isFinite(a.preis));
-    return json(200, { model, laden: String(data.laden ?? ''), datum: String(data.datum ?? ''), summe: num(data.summe) || null, artikel });
+    return json(200, { model: model_, laden: String(data.laden ?? ''), datum: String(data.datum ?? ''), summe: num(data.summe) || null, artikel });
   } catch {
     return json(502, { error: 'Gemini hat den Bon nicht lesbar beantwortet.' });
   }
